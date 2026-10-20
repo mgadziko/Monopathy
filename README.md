@@ -1,8 +1,17 @@
 # Monopathy
 
-Monopathy is a native macOS SwiftUI table for a four-player, LAN-connected
-game of standard US Monopoly. Each player endpoint proposes a strategy action;
-the app, rather than any model, is the authoritative rules engine.
+Monopathy is a native macOS SwiftUI game where four connected AI players play
+standard US Monopoly over a LAN. You can watch the board and table log, save
+and resume a game, and review each player's developing strategy journal. The
+players propose actions; the app's rules engine alone decides what is legal.
+
+## Project history
+
+The game began under the name Monopolathy as an experiment connecting Hermes
+players to a shared, rules-authoritative Monopoly table. It was renamed
+Monopathy in October 2026 and moved to this public repository. The original
+Monopolathy repository is now a private, end-of-life archive; new development
+and releases happen here.
 
 ## Current foundation
 
