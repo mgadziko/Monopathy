@@ -71,20 +71,54 @@ final class StrategyJournalStore: ObservableObject {
 
     init(directoryURL: URL? = nil) {
         self.directoryURL = directoryURL ?? Self.defaultDirectoryURL()
+        if directoryURL == nil { Self.migrateLegacyFiles(to: self.directoryURL) }
         loadExistingJournals()
         loadExistingProfiles()
     }
 
     static func defaultDirectoryURL(fileManager: FileManager = .default) -> URL {
-        let applicationSupport = (try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? fileManager.temporaryDirectory
-        return applicationSupport
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Documents", isDirectory: true)
+        return documents
             .appendingPathComponent("Monopathy", isDirectory: true)
             .appendingPathComponent("Strategy Journals", isDirectory: true)
+    }
+
+    /// Preserve the former files as a backup. A destination file always wins,
+    /// so launching an older build cannot replace newer learning.
+    static func migrateLegacyFiles(
+        to destinationURL: URL,
+        fileManager: FileManager = .default,
+        legacyDirectoryURLs: [URL]? = nil
+    ) {
+        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        let sources = legacyDirectoryURLs ?? ["Monopolathy", "Monopathy"].map {
+            applicationSupport.appendingPathComponent($0, isDirectory: true)
+                .appendingPathComponent("Strategy Journals", isDirectory: true)
+        }
+        for endpoint in PlayerEndpoint.allCases {
+            for suffix in [".json", "-profile.json"] {
+                let filename = endpoint.rawValue + suffix
+                let destination = destinationURL.appendingPathComponent(filename)
+                guard !fileManager.fileExists(atPath: destination.path) else { continue }
+                for sourceDirectory in sources {
+                    let source = sourceDirectory.appendingPathComponent(filename)
+                    guard let data = try? Data(contentsOf: source) else { continue }
+                    if suffix == ".json" {
+                        guard let journal = try? JSONDecoder().decode(StrategyJournal.self, from: data),
+                              journal.endpoint == endpoint else { continue }
+                    } else {
+                        guard (try? JSONDecoder().decode(StrategyProfile.self, from: data)) != nil else { continue }
+                    }
+                    do {
+                        try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+                        try fileManager.copyItem(at: source, to: destination)
+                        break
+                    } catch { /* Journal migration is non-fatal; originals remain in place. */ }
+                }
+            }
+        }
     }
 
     /// A compact, personal historical context. It is deliberately bounded so
@@ -285,11 +319,11 @@ final class StrategyJournalStore: ObservableObject {
     }
 
     private func recentEvents(for player: Player, in log: [GameLogEntry]) -> [String] {
-        let prefix = "\(player.name) "
+        let prefix = "\(GameLogEntry.displayText(for: player.name)) "
         let strategicMarkers = ["bought", "bid", "declined", "mortgaged", "unmortgaged"]
         var events: [String] = []
-        for entry in log where entry.text.hasPrefix(prefix) && strategicMarkers.contains(where: entry.text.localizedCaseInsensitiveContains) {
-            events.append(entry.text)
+        for entry in log where entry.displayText.hasPrefix(prefix) && strategicMarkers.contains(where: entry.displayText.localizedCaseInsensitiveContains) {
+            events.append(entry.displayText)
             if events.count == 4 { break }
         }
         return events
@@ -298,9 +332,10 @@ final class StrategyJournalStore: ObservableObject {
     private func decisionEvents(for player: Player, in log: [GameLogEntry]) -> [StrategyDecisionEvent] {
         let markers = ["bought", "bid", "declined", "mortgaged", "unmortgaged", "built", "sold"]
         var events: [StrategyDecisionEvent] = []
-        for entry in log where entry.text.hasPrefix("\(player.name) ") {
-            guard let kind = markers.first(where: { entry.text.localizedCaseInsensitiveContains($0) }) else { continue }
-            events.append(StrategyDecisionEvent(kind: kind, detail: entry.text))
+        let prefix = "\(GameLogEntry.displayText(for: player.name)) "
+        for entry in log where entry.displayText.hasPrefix(prefix) {
+            guard let kind = markers.first(where: { entry.displayText.localizedCaseInsensitiveContains($0) }) else { continue }
+            events.append(StrategyDecisionEvent(kind: kind, detail: entry.displayText))
             if events.count == 12 { break }
         }
         return events

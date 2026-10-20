@@ -53,7 +53,7 @@ final class MonopathyTests: XCTestCase {
 
         let gameID = UUID()
         let store = StrategyJournalStore(directoryURL: root)
-        store.record(gameID: gameID, winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [GameLogEntry(text: "\(engine.players[0].name) bought Baltic Avenue for $60.")])
+        store.record(gameID: gameID, winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [GameLogEntry(text: "\(GameLogEntry.displayText(for: engine.players[0].name)) bought Baltic Avenue for $60.")])
         store.record(gameID: gameID, winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [])
 
         let restored = StrategyJournalStore(directoryURL: root)
@@ -64,6 +64,53 @@ final class MonopathyTests: XCTestCase {
         XCTAssertTrue(winnerContext.contains("bought Baltic Avenue"))
         XCTAssertTrue(restored.context(for: .hal).contains("Personal strategy guidance"))
         XCTAssertFalse(restored.context(for: .hal).contains("Baltic Avenue"))
+    }
+
+    func testDefaultStrategyJournalDirectoryIsInDocuments() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        XCTAssertEqual(
+            StrategyJournalStore.defaultDirectoryURL(),
+            documents.appendingPathComponent("Monopathy/Strategy Journals", isDirectory: true)
+        )
+    }
+
+    func testStrategyJournalMigrationCopiesValidFilesWithoutOverwritingOrDeletingSources() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopathyMigration-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let oldProject = root.appendingPathComponent("old-project", isDirectory: true)
+        let oldRenamed = root.appendingPathComponent("old-renamed", isDirectory: true)
+        let destination = root.appendingPathComponent("Documents/Monopathy/Strategy Journals", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldProject, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: oldRenamed, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+
+        var journal = StrategyJournal(endpoint: .blackLotus)
+        journal.gamesPlayed = 3
+        let sourceJournal = oldProject.appendingPathComponent("\(PlayerEndpoint.blackLotus.rawValue).json")
+        try JSONEncoder().encode(journal).write(to: sourceJournal)
+        let existing = destination.appendingPathComponent(sourceJournal.lastPathComponent)
+        var newerJournal = journal
+        newerJournal.gamesPlayed = 4
+        try JSONEncoder().encode(newerJournal).write(to: existing)
+
+        var profile = StrategyProfile()
+        profile.activeGuidance = "Keep cash for rent."
+        let sourceProfile = oldRenamed.appendingPathComponent("\(PlayerEndpoint.blackLotus.rawValue)-profile.json")
+        try JSONEncoder().encode(profile).write(to: sourceProfile)
+        let whiteLotusJournal = oldProject.appendingPathComponent("\(PlayerEndpoint.whiteLotus.rawValue).json")
+        try JSONEncoder().encode(StrategyJournal(endpoint: .whiteLotus)).write(to: whiteLotusJournal)
+        let invalidJournal = oldProject.appendingPathComponent("\(PlayerEndpoint.hal.rawValue).json")
+        try Data("not JSON".utf8).write(to: invalidJournal)
+
+        StrategyJournalStore.migrateLegacyFiles(to: destination, legacyDirectoryURLs: [oldProject, oldRenamed])
+
+        let retained = try JSONDecoder().decode(StrategyJournal.self, from: Data(contentsOf: existing))
+        XCTAssertEqual(retained.gamesPlayed, 4)
+        XCTAssertEqual(try JSONDecoder().decode(StrategyProfile.self, from: Data(contentsOf: destination.appendingPathComponent(sourceProfile.lastPathComponent))).activeGuidance, "Keep cash for rent.")
+        XCTAssertEqual(try JSONDecoder().decode(StrategyJournal.self, from: Data(contentsOf: destination.appendingPathComponent(whiteLotusJournal.lastPathComponent))).endpoint, .whiteLotus)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent(invalidJournal.lastPathComponent).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceJournal.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceProfile.path))
     }
 
     func testStrategySuggestionRemainsCandidateUntilExplicitApproval() async throws {

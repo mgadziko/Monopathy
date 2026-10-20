@@ -114,7 +114,13 @@ shares one player's history with another.
 
 On the Mac running Monopathy, journals are stored outside the repository at:
 
-`~/Library/Application Support/Monopathy/Strategy Journals/`
+`~/Documents/Monopathy/Strategy Journals/`
+
+On first launch, valid journals and strategy profiles from the previous
+`Application Support` locations are copied into this folder if a destination
+file does not already exist. The originals remain as backups, and an existing
+file in the new folder is never overwritten. Game-save JSON files in
+`~/Documents/Monopathy/` are unaffected.
 
 There is one JSON file per endpoint, and each file retains at most eight game
 records. Deleting one of these files resets only that player's accumulated
