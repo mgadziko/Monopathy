@@ -14,6 +14,7 @@
 		111111111111111111111106 /* StandardRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111008 /* StandardRules.swift */; };
 		111111111111111111111107 /* TurnProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111009 /* TurnProtocol.swift */; };
 		111111111111111111111108 /* AboutBoxController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111199 /* AboutBoxController.swift */; };
+		111111111111111111111109 /* StrategyJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111198 /* StrategyJournal.swift */; };
 		111111111111111111111105 /* MonopolathyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111005 /* MonopolathyTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -36,6 +37,7 @@
 		111111111111111111111008 /* StandardRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandardRules.swift; sourceTree = "<group>"; };
 		111111111111111111111009 /* TurnProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnProtocol.swift; sourceTree = "<group>"; };
 		111111111111111111111199 /* AboutBoxController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutBoxController.swift; sourceTree = "<group>"; };
+		111111111111111111111198 /* StrategyJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyJournal.swift; sourceTree = "<group>"; };
 		111111111111111111111006 /* Monopolathy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monopolathy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		111111111111111111111007 /* MonopolathyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonopolathyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -77,6 +79,7 @@
 				111111111111111111111008 /* StandardRules.swift */,
 				111111111111111111111009 /* TurnProtocol.swift */,
 				111111111111111111111199 /* AboutBoxController.swift */,
+				111111111111111111111198 /* StrategyJournal.swift */,
 			);
 			path = Monopolathy;
 			sourceTree = "<group>";
@@ -223,6 +226,7 @@
 				111111111111111111111106 /* StandardRules.swift in Sources */,
 				111111111111111111111107 /* TurnProtocol.swift in Sources */,
 				111111111111111111111108 /* AboutBoxController.swift in Sources */,
+				111111111111111111111109 /* StrategyJournal.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -375,7 +379,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ricercar.Monopolathy;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Monopolathy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -398,7 +402,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ricercar.Monopolathy;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Monopolathy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -417,7 +421,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ricercar.MonopolathyTests;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.MonopolathyTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monopolathy.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Monopolathy";
@@ -436,7 +440,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.ricercar.MonopolathyTests;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.MonopolathyTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monopolathy.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Monopolathy";

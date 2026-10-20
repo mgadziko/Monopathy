@@ -32,6 +32,9 @@ struct ContentView: View {
         }
         .task { await refreshPlayers() }
         .onAppear { session.pauseAutomaticPlay = { isAutoPlaying = false } }
+        .onChange(of: game.phase) { phase in
+            if phase == .gameOver { session.strategyJournal.recordCompletedGame(game) }
+        }
     }
 
     private var lobby: some View {
@@ -363,7 +366,7 @@ struct ContentView: View {
         playerTurnStatus = "Waiting for \(player.name)'s legal move…"
         defer { isAskingPlayer = false }
         do {
-            let action = try await TurnCoordinator().playTurn(engine: game, transport: HermesTurnTransport(endpoint: player.endpoint))
+            let action = try await TurnCoordinator().playTurn(engine: game, transport: strategyTransport(for: player.endpoint))
             playerTurnStatus = "\(player.name) chose \(actionTitle(action))."
             return true
         } catch {
@@ -420,7 +423,7 @@ struct ContentView: View {
         playerTurnStatus = "Waiting for \(bidder.name)'s auction decision…"
         defer { isAskingPlayer = false }
         do {
-            let decision = try await AuctionCoordinator().requestAuctionDecision(engine: game, bidder: bidder, transport: HermesTurnTransport(endpoint: bidder.endpoint))
+            let decision = try await AuctionCoordinator().requestAuctionDecision(engine: game, bidder: bidder, transport: strategyTransport(for: bidder.endpoint))
             switch decision {
             case let .bid(amount): playerTurnStatus = "\(bidder.name) bid $\(amount)."
             case .pass: playerTurnStatus = "\(bidder.name) passed."
@@ -448,8 +451,8 @@ struct ContentView: View {
             let result = try await TradeCoordinator().negotiate(
                 engine: game,
                 proposer: proposer,
-                proposerTransport: HermesTurnTransport(endpoint: proposer.endpoint),
-                recipientTransport: { HermesTurnTransport(endpoint: $0) }
+                proposerTransport: strategyTransport(for: proposer.endpoint),
+                recipientTransport: { strategyTransport(for: $0) }
             )
             switch result {
             case .noOffer: playerTurnStatus = "\(proposer.name) made no trade offer."
@@ -489,7 +492,7 @@ struct ContentView: View {
             playerTurnStatus = "Waiting for \(player.name)'s asset decision…"
             defer { isAskingPlayer = false }
             do {
-                let decision = try await AssetCoordinator().requestDecision(engine: game, player: currentPlayer, transport: HermesTurnTransport(endpoint: currentPlayer.endpoint))
+                let decision = try await AssetCoordinator().requestDecision(engine: game, player: currentPlayer, transport: strategyTransport(for: currentPlayer.endpoint))
                 if decision == .done { return true }
             } catch {
                 if OptionalDecisionPolicy.shouldContinueAfterOptionalAssetFailure(error) {
@@ -517,8 +520,8 @@ struct ContentView: View {
             _ = try await TradeCoordinator().negotiate(
                 engine: game,
                 proposer: player,
-                proposerTransport: HermesTurnTransport(endpoint: player.endpoint),
-                recipientTransport: { HermesTurnTransport(endpoint: $0) }
+                proposerTransport: strategyTransport(for: player.endpoint),
+                recipientTransport: { strategyTransport(for: $0) }
             )
             if game.playerNeedingDebtResolution?.cash ?? 0 >= 0 {
                 isAskingPlayer = false
@@ -526,8 +529,12 @@ struct ContentView: View {
             }
         } catch {
             isAskingPlayer = false
-            playerTurnStatus = error.localizedDescription
-            return false
+            guard OptionalDecisionPolicy.shouldContinueAfterDebtSettlementTradeFailure(error) else {
+                playerTurnStatus = error.localizedDescription
+                return false
+            }
+            let outcome = OptionalDecisionPolicy.shouldContinueAfterOptionalFailure(error) ? "timed out" : "was rejected"
+            playerTurnStatus = "\(player.name)'s debt-settlement trade proposal \(outcome); continuing to liquidation."
         }
         isAskingPlayer = false
         if game.declareBankruptcyIfNoLiquidationOptions(by: player.id) {
@@ -539,7 +546,7 @@ struct ContentView: View {
             playerTurnStatus = "Waiting for \(player.name) to settle debt…"
             defer { isAskingPlayer = false }
             do {
-                let decision = try await AssetCoordinator().requestDecision(engine: game, player: player, transport: HermesTurnTransport(endpoint: player.endpoint))
+                let decision = try await AssetCoordinator().requestDecision(engine: game, player: player, transport: strategyTransport(for: player.endpoint))
                 if decision == .done {
                     return game.resolveOutstandingDebt(by: player.id)
                 }
@@ -550,6 +557,10 @@ struct ContentView: View {
         }
         playerTurnStatus = "Debt-settlement limit reached for \(player.name)."
         return false
+    }
+
+    private func strategyTransport(for endpoint: PlayerEndpoint) -> HermesTurnTransport {
+        HermesTurnTransport(endpoint: endpoint, strategyContext: session.strategyJournal.context(for: endpoint))
     }
 }
 

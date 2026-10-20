@@ -37,6 +37,17 @@ final class GameEngine: ObservableObject {
     @Published private(set) var mortgagedSpaceIDs: Set<Int> = []
     @Published private(set) var auction: AuctionState?
 
+    var winnerID: UUID? {
+        guard case let .gameOver(winner) = pendingAction else { return nil }
+        return winner
+    }
+
+    /// The win log entry provides a stable per-game identifier, including if a
+    /// completed save is later reopened.
+    var completionID: UUID? {
+        winnerID == nil ? nil : log.first?.id
+    }
+
     private let startingCash = 1_500
     private let dice: () -> (Int, Int)
     private let deckOrder: [MonopolyCard]?
@@ -404,8 +415,18 @@ final class GameEngine: ObservableObject {
         players[fromIndex].properties.formUnion(offer.toProperties)
         players[toIndex].properties.subtract(offer.toProperties)
         players[toIndex].properties.formUnion(offer.fromProperties)
-        append("Trade completed between \(players[fromIndex].name) and \(players[toIndex].name).")
+        let fromTerms = tradeTerms(cash: offer.fromCash, properties: offer.fromProperties)
+        let toTerms = tradeTerms(cash: offer.toCash, properties: offer.toProperties)
+        append("Trade completed: \(players[fromIndex].name) gave \(fromTerms) to \(players[toIndex].name); \(players[toIndex].name) gave \(toTerms) to \(players[fromIndex].name).")
         return true
+    }
+
+    private func tradeTerms(cash: Int, properties: Set<Int>) -> String {
+        var terms: [String] = []
+        if cash > 0 { terms.append("$\(cash)") }
+        let propertyNames = properties.sorted().map { board[$0].name }
+        terms.append(contentsOf: propertyNames)
+        return terms.isEmpty ? "nothing" : terms.joined(separator: " and ")
     }
 
     private func payJailFine() {

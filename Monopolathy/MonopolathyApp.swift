@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class GameSession: ObservableObject {
     let game = GameEngine()
+    let strategyJournal = StrategyJournalStore()
     var pauseAutomaticPlay: (() -> Void)?
 
     func saveGame() {

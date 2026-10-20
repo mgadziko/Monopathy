@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>Monopolathy</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.ricercar.Monopolathy</string>
+	<string>net.quantumpenguin.Monopolathy</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -35,14 +35,14 @@
 	<key>DTSDKName</key>
 	<string>macosx27.0</string>
 	<key>DTXcode</key>
-	<string>2700</string>
+	<string>2710</string>
 	<key>DTXcodeBuild</key>
-	<string>27A266a</string>
+	<string>27A9275</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>MonopathyBuildTimestamp</key>
-	<string>261007-211024</string>
+	<string>261020-063309</string>
 </dict>
 </plist>

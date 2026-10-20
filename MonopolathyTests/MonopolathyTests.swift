@@ -26,6 +26,35 @@ final class MonopolathyTests: XCTestCase {
         XCTAssertEqual(templateArguments["enable_thinking"], false)
     }
 
+    func testStrategyJournalPersistsPerPlayerAndAddsOnlyPersonalContext() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopolathyStrategyJournal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        engine.grantPropertiesForTesting([1, 3], to: engine.players[0].id)
+
+        let gameID = UUID()
+        let store = StrategyJournalStore(directoryURL: root)
+        store.record(gameID: gameID, winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [GameLogEntry(text: "\(engine.players[0].name) bought Baltic Avenue for $60.")])
+        store.record(gameID: gameID, winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [])
+
+        let restored = StrategyJournalStore(directoryURL: root)
+        let winnerContext = restored.context(for: engine.players[0].endpoint)
+        XCTAssertTrue(winnerContext.contains("completed 1 game(s) and won 1"))
+        XCTAssertTrue(winnerContext.contains("Mediterranean Avenue"))
+        XCTAssertTrue(winnerContext.contains("Brown 2/2"))
+        XCTAssertTrue(winnerContext.contains("bought Baltic Avenue"))
+        XCTAssertEqual(restored.context(for: .hal), "")
+    }
+
+    func testHermesTurnTransportPrependsStrategyJournal() {
+        let transport = HermesTurnTransport(endpoint: .blackLotus, strategyContext: "Personal strategy journal: one prior win.")
+        XCTAssertEqual(
+            transport.decoratedPrompt("Return one JSON action."),
+            "Personal strategy journal: one prior win.\n\nCurrent decision:\nReturn one JSON action."
+        )
+    }
+
     func testOptionalAssetDecisionIsSkippedWithoutLegalAssetAction() {
         let engine = GameEngine()
         engine.start(endpoints: fourPlayers)
@@ -56,6 +85,14 @@ final class MonopolathyTests: XCTestCase {
         ))
         XCTAssertTrue(OptionalDecisionPolicy.shouldContinueAfterOptionalTradeFailure(URLError(.timedOut)))
         XCTAssertFalse(OptionalDecisionPolicy.shouldContinueAfterOptionalTradeFailure(TradeCoordinatorError.engineRejected))
+    }
+
+    func testRejectedDebtSettlementTradeContinuesToLiquidation() {
+        XCTAssertTrue(OptionalDecisionPolicy.shouldContinueAfterDebtSettlementTradeFailure(
+            TradeCoordinatorError.proposalRejected(.illegalProposal("engine validation failed"))
+        ))
+        XCTAssertTrue(OptionalDecisionPolicy.shouldContinueAfterDebtSettlementTradeFailure(URLError(.timedOut)))
+        XCTAssertFalse(OptionalDecisionPolicy.shouldContinueAfterDebtSettlementTradeFailure(TradeCoordinatorError.engineRejected))
     }
 
     func testRejectedOptionalAssetDecisionContinuesAfterValidation() {
@@ -277,6 +314,10 @@ final class MonopolathyTests: XCTestCase {
         XCTAssertTrue(engine.players[1].properties.contains(1))
         XCTAssertEqual(engine.players[0].cash, 1_425)
         XCTAssertEqual(engine.players[1].cash, 1_575)
+        XCTAssertEqual(
+            engine.log.first?.text,
+            "Trade completed: \(first.name) gave $100 and Mediterranean Avenue to \(second.name); \(second.name) gave $25 and Baltic Avenue to \(first.name)."
+        )
     }
 
     func testInsolventPlayerTransfersAssetsToCreditor() {

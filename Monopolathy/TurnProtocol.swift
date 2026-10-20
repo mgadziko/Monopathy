@@ -475,6 +475,13 @@ enum OptionalDecisionPolicy {
         return false
     }
 
+    /// An insolvent player may still mortgage or sell buildings after an
+    /// unusable rescue-trade proposal. Do not turn a bad model reply into a
+    /// table-wide stop or an immediate bankruptcy.
+    static func shouldContinueAfterDebtSettlementTradeFailure(_ error: Error) -> Bool {
+        shouldContinueAfterOptionalTradeFailure(error)
+    }
+
     static func shouldContinueAfterOptionalAssetFailure(_ error: Error) -> Bool {
         shouldContinueAfterOptionalFailure(error) || error is AssetProtocolError
     }
@@ -561,6 +568,12 @@ enum HermesTurnTransportError: LocalizedError {
 /// Hermes tools, sessions, memory, or terminal workflows.
 struct HermesTurnTransport: PlayerTurnTransport {
     let endpoint: PlayerEndpoint
+    let strategyContext: String
+
+    init(endpoint: PlayerEndpoint, strategyContext: String = "") {
+        self.endpoint = endpoint
+        self.strategyContext = strategyContext
+    }
 
     func respond(to prompt: String) async throws -> String {
         guard let profile = endpoint.hermesProfileName,
@@ -574,7 +587,7 @@ struct HermesTurnTransport: PlayerTurnTransport {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(Request(
             model: backend.model,
-            messages: [.init(role: "user", content: prompt)],
+            messages: [.init(role: "user", content: decoratedPrompt(prompt))],
             maxTokens: 128,
             temperature: 0,
             chatTemplateKwargs: ["enable_thinking": false]
@@ -583,6 +596,11 @@ struct HermesTurnTransport: PlayerTurnTransport {
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
               let reply = try? JSONDecoder().decode(Response.self, from: data).choices.first?.message.content?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty else { throw HermesTurnTransportError.invalidResponse }
         return reply
+    }
+
+    func decoratedPrompt(_ prompt: String) -> String {
+        guard !strategyContext.isEmpty else { return prompt }
+        return "\(strategyContext)\n\nCurrent decision:\n\(prompt)"
     }
 
     private static func selectedBackend(in text: String) -> (api: URL, model: String)? {
