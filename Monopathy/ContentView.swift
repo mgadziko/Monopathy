@@ -11,9 +11,11 @@ struct ContentView: View {
     ]
     @State private var availability = Dictionary(uniqueKeysWithValues: PlayerEndpoint.allCases.map { ($0, PlayerAvailability.checking) })
     @State private var isAskingPlayer = false
+    @State private var waitingStartedAt: Date?
     @State private var isAutoPlaying = false
     @State private var tradeWindowPlayerID: UUID?
     @State private var assetWindowPlayerID: UUID?
+    @State private var purchaseFundingWindowPlayerID: UUID?
     @State private var playerTurnStatus: String?
     @State private var selectedSpaceID: Int?
 
@@ -32,8 +34,21 @@ struct ContentView: View {
         }
         .task { await refreshPlayers() }
         .onAppear { session.pauseAutomaticPlay = { isAutoPlaying = false } }
-        .onChange(of: game.phase) { phase in
-            if phase == .gameOver { session.strategyJournal.recordCompletedGame(game) }
+        .onChange(of: game.phase) { _, phase in
+            if phase != .awaitingPurchase { purchaseFundingWindowPlayerID = nil }
+            if phase == .gameOver {
+                session.strategyJournal.recordCompletedGame(game)
+                if let gameID = game.completionID {
+                    for player in game.players where player.kind == .ai && player.endpoint.hermesProfileName != nil {
+                        Task {
+                            await session.strategyJournal.review(
+                                player.endpoint, gameID: gameID,
+                                transport: HermesTurnTransport(endpoint: player.endpoint)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -91,9 +106,12 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    game.start(endpoints: slots.compactMap(\.endpoint))
+                    let endpoints = slots.compactMap(\.endpoint)
+                    game.start(endpoints: endpoints)
+                    session.strategyJournal.beginGame(endpoints: endpoints, gameStartID: game.log.last?.id)
                     tradeWindowPlayerID = nil
                     assetWindowPlayerID = nil
+                    purchaseFundingWindowPlayerID = nil
                     beginAutomaticPlay()
                 } label: { Label("Start Game", systemImage: "play.fill") }
                     .buttonStyle(.borderedProminent).disabled(!canStart)
@@ -134,12 +152,25 @@ struct ContentView: View {
                     .frame(minWidth: 560, maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Table log").font(.headline)
-                    ScrollView { LazyVStack(alignment: .leading, spacing: 6) { ForEach(game.log) { Text($0.text).font(.callout) } } }
+                    ScrollView { LazyVStack(alignment: .leading, spacing: 6) { ForEach(game.log) { Text($0.displayText).font(.callout) } } }
                         .frame(minHeight: 400)
                 }.frame(width: 300, alignment: .leading)
             }
             if let playerTurnStatus {
-                Text(playerTurnStatus).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(playerTurnStatus)
+                    if let waitingStartedAt {
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            // The schedule's date may restart when SwiftUI rebuilds
+                            // this view. Measure against the current clock instead.
+                            let elapsed = WaitingTimeFormatter.string(since: waitingStartedAt, now: .now)
+                            Text("Elapsed \(elapsed)")
+                                .monospacedDigit()
+                                .accessibilityLabel("Request elapsed time \(elapsed)")
+                        }
+                    }
+                }
+                .foregroundStyle(.secondary)
             }
             HStack {
                 ForEach(game.legalActions, id: \.self) { action in
@@ -147,6 +178,7 @@ struct ContentView: View {
                 }
                 Spacer()
                 Button {
+                    session.decisionWaitClock.reset()
                     Task { _ = await askCurrentPlayer() }
                 } label: {
                     Label(isAskingPlayer ? "Waiting for Player…" : "Ask Current Player", systemImage: "person.crop.circle.badge.play")
@@ -154,15 +186,22 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isAskingPlayer || isAutoPlaying || game.phase == .auction || game.phase == .trading || game.phase == .gameOver)
                 Button {
-                    if isAutoPlaying { isAutoPlaying = false } else { beginAutomaticPlay() }
+                    if isAutoPlaying {
+                        isAutoPlaying = false
+                    } else {
+                        session.decisionWaitClock.reset()
+                        beginAutomaticPlay()
+                    }
                 } label: {
                     Label(isAutoPlaying ? "Stop Automatic Play" : "Resume Automatic Play", systemImage: isAutoPlaying ? "stop.fill" : "play.fill")
                 }
                 .disabled(isAskingPlayer || game.phase == .trading || game.phase == .gameOver)
                 Button("New Game") {
                     isAutoPlaying = false
+                    session.decisionWaitClock.reset()
                     tradeWindowPlayerID = nil
                     assetWindowPlayerID = nil
+                    purchaseFundingWindowPlayerID = nil
                     game.returnToLobby()
                 }
             }
@@ -235,8 +274,8 @@ struct ContentView: View {
             ForEach(groups.indices, id: \.self) { index in
                 VStack(spacing: 2) {
                     ForEach(groups[index], id: \.self) { spaceID in
-                        Circle().fill(boardColor(for: spaceID)).frame(width: 7, height: 7)
-                            .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 0.5))
+                        Circle().fill(boardColor(for: spaceID)).frame(width: 8, height: 8)
+                            .overlay(Circle().stroke(.white.opacity(0.7), lineWidth: 0.75))
                     }
                 }
             }
@@ -323,9 +362,9 @@ struct ContentView: View {
 
     private func boardColor(for spaceID: Int) -> Color {
         switch spaceID {
-        case 1, 3: .purple
+        case 1, 3: Color(red: 0.40, green: 0.18, blue: 0.67)
         case 6, 8, 9: .cyan
-        case 11, 13, 14: .pink
+        case 11, 13, 14: Color(red: 1.0, green: 0.12, blue: 0.72)
         case 16, 18, 19: .orange
         case 21, 23, 24: .red
         case 26, 27, 29: .yellow
@@ -348,6 +387,23 @@ struct ContentView: View {
         }
     }
 
+    @MainActor private func beginWaiting(_ status: String) {
+        isAskingPlayer = true
+        let decisionKey = [
+            status,
+            game.currentPlayer?.id.uuidString ?? "no-player",
+            game.phase.rawValue,
+            game.log.first?.id.uuidString ?? "no-event"
+        ].joined(separator: "|")
+        waitingStartedAt = session.decisionWaitClock.start(for: decisionKey)
+        playerTurnStatus = status
+    }
+
+    @MainActor private func endWaiting() {
+        isAskingPlayer = false
+        waitingStartedAt = nil
+    }
+
     @MainActor private func refreshPlayers() async {
         for endpoint in PlayerEndpoint.allCases { availability[endpoint] = .checking }
         await withTaskGroup(of: (PlayerEndpoint, PlayerAvailability).self) { group in
@@ -358,13 +414,13 @@ struct ContentView: View {
 
     @MainActor private func askCurrentPlayer() async -> Bool {
         guard let player = game.currentPlayer else { return false }
+        guard await managePurchaseFundingIfNeeded() else { return false }
         guard player.endpoint.hermesProfileName != nil else {
             playerTurnStatus = "ChatGPT connection is not configured yet."
             return false
         }
-        isAskingPlayer = true
-        playerTurnStatus = "Waiting for \(player.name)'s legal move…"
-        defer { isAskingPlayer = false }
+        beginWaiting("Waiting for \(player.name)'s legal move…")
+        defer { endWaiting() }
         do {
             let action = try await TurnCoordinator().playTurn(engine: game, transport: strategyTransport(for: player.endpoint))
             playerTurnStatus = "\(player.name) chose \(actionTitle(action))."
@@ -381,9 +437,9 @@ struct ContentView: View {
         Task { await playAutomatically() }
     }
 
-    /// Every model still receives only one validated decision at a time. There
-    /// is intentionally no delay: a player may immediately take a further
-    /// roll after doubles, as standard Monopoly permits.
+    /// Model decisions are serialized and validated. There is intentionally
+    /// no delay: a player may immediately take a further roll after doubles,
+    /// as standard Monopoly permits.
     @MainActor private func playAutomatically() async {
         defer { isAutoPlaying = false }
         var decisions = 0
@@ -394,7 +450,9 @@ struct ContentView: View {
                 guard await settleOutstandingDebt() else { break }
             } else {
                 guard game.phase != .trading, game.phase != .gameOver else { break }
-                guard await manageAssetsIfNeeded() else { break }
+                if game.phase != .awaitingPurchase {
+                    guard await manageAssetsIfNeeded() else { break }
+                }
                 guard await negotiateTradeIfNeeded() else { break }
                 guard await askCurrentPlayer() else { break }
             }
@@ -419,9 +477,8 @@ struct ContentView: View {
             playerTurnStatus = "ChatGPT connection is not configured yet."
             return false
         }
-        isAskingPlayer = true
-        playerTurnStatus = "Waiting for \(bidder.name)'s auction decision…"
-        defer { isAskingPlayer = false }
+        beginWaiting("Waiting for \(bidder.name)'s auction decision…")
+        defer { endWaiting() }
         do {
             let decision = try await AuctionCoordinator().requestAuctionDecision(engine: game, bidder: bidder, transport: strategyTransport(for: bidder.endpoint))
             switch decision {
@@ -444,9 +501,8 @@ struct ContentView: View {
             playerTurnStatus = "ChatGPT connection is not configured yet."
             return false
         }
-        isAskingPlayer = true
-        playerTurnStatus = "Waiting for \(proposer.name)'s trade decision…"
-        defer { isAskingPlayer = false }
+        beginWaiting("Waiting for \(proposer.name)'s trade decision…")
+        defer { endWaiting() }
         do {
             let result = try await TradeCoordinator().negotiate(
                 engine: game,
@@ -488,9 +544,8 @@ struct ContentView: View {
                 playerTurnStatus = "\(player.name) repeated an optional asset state; continuing play."
                 return true
             }
-            isAskingPlayer = true
-            playerTurnStatus = "Waiting for \(player.name)'s asset decision…"
-            defer { isAskingPlayer = false }
+            beginWaiting("Waiting for \(player.name)'s asset decision…")
+            defer { endWaiting() }
             do {
                 let decision = try await AssetCoordinator().requestDecision(engine: game, player: currentPlayer, transport: strategyTransport(for: currentPlayer.endpoint))
                 if decision == .done { return true }
@@ -508,14 +563,58 @@ struct ContentView: View {
         return true
     }
 
+    @MainActor private func managePurchaseFundingIfNeeded() async -> Bool {
+        guard game.phase == .awaitingPurchase,
+              case let .offerPurchase(spaceID, price) = game.pendingAction,
+              let player = game.currentPlayer,
+              player.cash < price else { return true }
+        guard purchaseFundingWindowPlayerID != player.id else { return true }
+        purchaseFundingWindowPlayerID = player.id
+        let offer = PropertyDecisionContext(engine: game, spaceID: spaceID, printedPrice: price)
+        var seenAssetStates = Set<String>()
+        for _ in 0..<40 {
+            guard let currentPlayer = game.currentPlayer else { return false }
+            if currentPlayer.cash >= price { return true }
+            let snapshot = AssetSnapshot(engine: game, player: currentPlayer)
+            guard snapshot.hasFundingActions else { return true }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let state = String(data: (try? encoder.encode(snapshot)) ?? Data(), encoding: .utf8) ?? ""
+            guard seenAssetStates.insert(state).inserted else {
+                playerTurnStatus = "\(player.name) repeated a purchase-funding state; continuing to the purchase decision."
+                return true
+            }
+            beginWaiting("Waiting for \(player.name) to raise purchase cash…")
+            defer { endWaiting() }
+            do {
+                let decision = try await AssetCoordinator().requestDecision(
+                    engine: game,
+                    player: currentPlayer,
+                    transport: strategyTransport(for: currentPlayer.endpoint),
+                    fundingPurchase: offer
+                )
+                if decision == .done { return true }
+            } catch {
+                if OptionalDecisionPolicy.shouldContinueAfterOptionalAssetFailure(error) {
+                    playerTurnStatus = "\(player.name)'s optional purchase-funding action was rejected; continuing to the purchase decision."
+                    return true
+                }
+                playerTurnStatus = error.localizedDescription
+                return false
+            }
+        }
+        playerTurnStatus = "Purchase-funding limit reached for \(player.name); continuing to the purchase decision."
+        return true
+    }
+
     @MainActor private func settleOutstandingDebt() async -> Bool {
         guard let player = game.playerNeedingDebtResolution else { return false }
+        if game.resolveOutstandingDebtIfCovered(by: player.id) { return true }
         guard player.endpoint.hermesProfileName != nil else {
             playerTurnStatus = "ChatGPT connection is not configured yet."
             return false
         }
-        isAskingPlayer = true
-        playerTurnStatus = "Waiting for \(player.name)'s debt-settlement trade…"
+        beginWaiting("Waiting for \(player.name)'s debt-settlement trade…")
         do {
             _ = try await TradeCoordinator().negotiate(
                 engine: game,
@@ -523,12 +622,12 @@ struct ContentView: View {
                 proposerTransport: strategyTransport(for: player.endpoint),
                 recipientTransport: { strategyTransport(for: $0) }
             )
-            if game.playerNeedingDebtResolution?.cash ?? 0 >= 0 {
-                isAskingPlayer = false
-                return game.resolveOutstandingDebt(by: player.id)
+            if game.resolveOutstandingDebtIfCovered(by: player.id) {
+                endWaiting()
+                return true
             }
         } catch {
-            isAskingPlayer = false
+            endWaiting()
             guard OptionalDecisionPolicy.shouldContinueAfterDebtSettlementTradeFailure(error) else {
                 playerTurnStatus = error.localizedDescription
                 return false
@@ -536,20 +635,22 @@ struct ContentView: View {
             let outcome = OptionalDecisionPolicy.shouldContinueAfterOptionalFailure(error) ? "timed out" : "was rejected"
             playerTurnStatus = "\(player.name)'s debt-settlement trade proposal \(outcome); continuing to liquidation."
         }
-        isAskingPlayer = false
+        endWaiting()
         if game.declareBankruptcyIfNoLiquidationOptions(by: player.id) {
             playerTurnStatus = "\(player.name) has no assets left to liquidate and is bankrupt."
             return true
         }
         for _ in 0..<40 {
-            isAskingPlayer = true
-            playerTurnStatus = "Waiting for \(player.name) to settle debt…"
-            defer { isAskingPlayer = false }
+            if game.resolveOutstandingDebtIfCovered(by: player.id) { return true }
+            guard let currentPlayer = game.playerNeedingDebtResolution else { return false }
+            beginWaiting("Waiting for \(player.name) to settle debt…")
+            defer { endWaiting() }
             do {
-                let decision = try await AssetCoordinator().requestDecision(engine: game, player: player, transport: strategyTransport(for: player.endpoint))
+                let decision = try await AssetCoordinator().requestDecision(engine: game, player: currentPlayer, transport: strategyTransport(for: currentPlayer.endpoint))
                 if decision == .done {
                     return game.resolveOutstandingDebt(by: player.id)
                 }
+                if game.resolveOutstandingDebtIfCovered(by: player.id) { return true }
             } catch {
                 playerTurnStatus = error.localizedDescription
                 return false
@@ -561,6 +662,35 @@ struct ContentView: View {
 
     private func strategyTransport(for endpoint: PlayerEndpoint) -> HermesTurnTransport {
         HermesTurnTransport(endpoint: endpoint, strategyContext: session.strategyJournal.context(for: endpoint))
+    }
+}
+
+enum WaitingTimeFormatter {
+    static func string(since start: Date, now: Date) -> String {
+        let elapsed = max(0, Int(now.timeIntervalSince(start)))
+        let hours = elapsed / 3_600
+        let minutes = (elapsed / 60) % 60
+        let seconds = elapsed % 60
+        if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+struct DecisionWaitClock {
+    private(set) var key: String?
+    private(set) var startedAt: Date?
+
+    mutating func start(for decisionKey: String, now: Date = .now) -> Date {
+        if key != decisionKey || startedAt == nil {
+            key = decisionKey
+            startedAt = now
+        }
+        return startedAt ?? now
+    }
+
+    mutating func reset() {
+        key = nil
+        startedAt = nil
     }
 }
 

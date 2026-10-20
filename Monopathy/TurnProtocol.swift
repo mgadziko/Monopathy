@@ -29,6 +29,41 @@ enum ProtocolJSON {
     }
 }
 
+struct PropertyDecisionContext: Codable, Equatable {
+    struct GroupMember: Codable, Equatable {
+        let name: String
+        let ownerName: String?
+        let mortgaged: Bool
+        let buildings: Int
+    }
+
+    let spaceID: Int
+    let name: String
+    let kind: SpaceKind
+    let printedPrice: Int
+    let colorGroup: String?
+    let baseRent: Int?
+    let groupMembers: [GroupMember]
+
+    @MainActor init(engine: GameEngine, spaceID: Int, printedPrice: Int? = nil) {
+        let space = engine.board[spaceID]
+        self.spaceID = spaceID
+        name = space.name
+        kind = space.kind
+        self.printedPrice = printedPrice ?? space.price
+        colorGroup = space.colorGroup
+        baseRent = space.kind == .utility ? nil : space.rent
+        groupMembers = engine.board.filter { $0.colorGroup == space.colorGroup && $0.isPurchasable }.map { member in
+            GroupMember(
+                name: member.name,
+                ownerName: engine.players.first { $0.properties.contains(member.id) }?.name,
+                mortgaged: engine.mortgagedSpaceIDs.contains(member.id),
+                buildings: engine.buildingsBySpaceID[member.id, default: 0]
+            )
+        }
+    }
+}
+
 struct TurnSnapshot: Codable, Equatable {
     struct PlayerState: Codable, Equatable, Identifiable {
         let id: UUID
@@ -45,6 +80,7 @@ struct TurnSnapshot: Codable, Equatable {
     let lastRoll: [Int]?
     let players: [PlayerState]
     let legalActions: [String]
+    let purchaseOffer: PropertyDecisionContext?
 
     @MainActor init(engine: GameEngine) {
         currentPlayerID = engine.currentPlayer?.id ?? UUID()
@@ -53,6 +89,11 @@ struct TurnSnapshot: Codable, Equatable {
         lastRoll = engine.lastRoll.map { [$0.0, $0.1] }
         players = engine.players.map { .init(id: $0.id, name: $0.name, cash: $0.cash, position: $0.position, properties: $0.properties.sorted(), bankrupt: $0.bankrupt) }
         legalActions = engine.legalActions.map(TurnProtocol.name(for:))
+        if case let .offerPurchase(spaceID, price) = engine.pendingAction {
+            purchaseOffer = PropertyDecisionContext(engine: engine, spaceID: spaceID, printedPrice: price)
+        } else {
+            purchaseOffer = nil
+        }
     }
 }
 
@@ -93,6 +134,8 @@ enum TurnProtocol {
         Table state JSON:
         \(state)
 
+        If a purchaseOffer is present, buy_property purchases it for its printedPrice if you have enough cash. Declining sends it to a standard auction in which you may also bid; declining does not guarantee a lower price. Decide using the listed property and your current cash.
+
         Reply with exactly one JSON object and no Markdown or explanation:
         {"action":"one_of_the_legal_actions"}
         """
@@ -129,6 +172,12 @@ enum TurnCoordinatorError: LocalizedError {
 @MainActor
 final class TurnCoordinator {
     func playTurn(engine: GameEngine, transport: any PlayerTurnTransport) async throws -> GameAction {
+        // The caller offers purchase funding first. With no cash to buy,
+        // declining is the only remaining purchase decision.
+        if engine.legalActions == [.declineProperty] {
+            guard engine.submit(.declineProperty) else { throw TurnCoordinatorError.engineRejected }
+            return .declineProperty
+        }
         let snapshot = TurnSnapshot(engine: engine)
         let reply = try await transport.respond(to: TurnProtocol.prompt(for: snapshot))
         do {
@@ -145,7 +194,7 @@ struct AuctionSnapshot: Codable, Equatable {
     let playerID: UUID
     let playerName: String
     let playerCash: Int
-    let propertyName: String
+    let property: PropertyDecisionContext
     let currentBid: Int
     let leadingBidderName: String?
     let minimumBid: Int
@@ -155,7 +204,7 @@ struct AuctionSnapshot: Codable, Equatable {
         playerID = bidder.id
         playerName = bidder.name
         playerCash = bidder.cash
-        propertyName = engine.board[auction.spaceID].name
+        property = PropertyDecisionContext(engine: engine, spaceID: auction.spaceID)
         currentBid = auction.leadingBid
         leadingBidderName = auction.leadingBidderID.flatMap { id in engine.players.first(where: { $0.id == id })?.name }
         minimumBid = auction.leadingBid + 1
@@ -192,7 +241,7 @@ enum AuctionProtocol {
         return """
         You are \(snapshot.playerName), participating in a standard-rules Monopoly auction. Decide strategy yourself. You may bid any whole-dollar amount from \(snapshot.minimumBid) through \(snapshot.playerCash), or pass permanently. Do not invent other actions.
 
-        Make a decisive valuation-based choice. If you bid, choose the highest price you would genuinely be willing to pay for this property now; do not mechanically raise the current bid by $1 merely to extend the auction. Another player can outbid you and you will be asked again, so a bid should reflect your actual valuation. Pass if the property is not worth at least the minimum bid to you. Your answer does not set a sealed maximum or constrain later bids; it is only your current standard-rules bid.
+        The printedPrice is a reference, not a bid cap. The winning bid is paid in full to the Bank. Use the property details, group ownership, and your cash to choose the amount you want to offer now, or pass. Do not automatically bid the minimum increment or your entire cash balance. If outbid, you may be asked again; this bid is not a sealed maximum.
 
         Auction state JSON:
         \(state)
@@ -442,6 +491,10 @@ struct AssetSnapshot: Codable, Equatable {
         !buildableProperties.isEmpty || !sellableProperties.isEmpty ||
             !mortgageableProperties.isEmpty || !unmortgageableProperties.isEmpty
     }
+
+    var hasFundingActions: Bool {
+        !sellableProperties.isEmpty || !mortgageableProperties.isEmpty
+    }
 }
 
 enum OptionalDecisionPolicy {
@@ -496,12 +549,17 @@ enum AssetProtocolError: LocalizedError, Equatable {
 }
 
 enum AssetProtocol {
-    static func prompt(for snapshot: AssetSnapshot, correctingMalformedReply: Bool = false) -> String {
+    static func prompt(for snapshot: AssetSnapshot, correctingMalformedReply: Bool = false, fundingPurchase: PropertyDecisionContext? = nil) -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let state = String(data: (try? encoder.encode(snapshot)) ?? Data(), encoding: .utf8) ?? "{}"
-        let instruction = snapshot.cash < 0
-            ? "You owe money. Sell buildings or mortgage legal property until you can pay; reply done only to declare bankruptcy or after restoring a non-negative balance."
-            : "Before rolling, you may make one legal asset-management action or finish."
+        let instruction: String
+        if let fundingPurchase {
+            instruction = "You are offered \(fundingPurchase.name) for $\(fundingPurchase.printedPrice), but have $\(snapshot.cash). You may sell buildings or mortgage legal property to raise cash before deciding whether to buy. Reply done when you have raised enough or choose not to; the purchase choice follows separately."
+        } else if snapshot.cash < 0 {
+            instruction = "You owe money. Sell buildings or mortgage legal property until you can pay; reply done only to declare bankruptcy or after restoring a non-negative balance."
+        } else {
+            instruction = "Before rolling, you may make one legal asset-management action or finish."
+        }
         let correction = correctingMalformedReply ? "Your prior reply was not usable. Reply with one JSON object only—no Markdown or explanation." : ""
         return """
         You are \(snapshot.playerName), playing standard-rules Monopoly. \(instruction) \(correction) Strategy is entirely yours; the game validates everything.
@@ -533,10 +591,10 @@ enum AssetProtocol {
 
 @MainActor
 final class AssetCoordinator {
-    func requestDecision(engine: GameEngine, player: Player, transport: any PlayerTurnTransport) async throws -> AssetDecision {
+    func requestDecision(engine: GameEngine, player: Player, transport: any PlayerTurnTransport, fundingPurchase: PropertyDecisionContext? = nil) async throws -> AssetDecision {
         for attempt in 0..<3 {
             do {
-                let reply = try await transport.respond(to: AssetProtocol.prompt(for: AssetSnapshot(engine: engine, player: player), correctingMalformedReply: attempt > 0))
+                let reply = try await transport.respond(to: AssetProtocol.prompt(for: AssetSnapshot(engine: engine, player: player), correctingMalformedReply: attempt > 0, fundingPurchase: fundingPurchase))
                 let decision = try AssetProtocol.decision(from: reply)
                 let applied: Bool
                 switch decision {

@@ -1,6 +1,6 @@
-# Monopolathy
+# Monopathy
 
-Monopolathy is a native macOS SwiftUI table for a four-player, LAN-connected
+Monopathy is a native macOS SwiftUI table for a four-player, LAN-connected
 game of standard US Monopoly. Each player endpoint proposes a strategy action;
 the app, rather than any model, is the authoritative rules engine.
 
@@ -26,6 +26,10 @@ the app, rather than any model, is the authoritative rules engine.
   pays half the purchase price, suppresses rent, and blocks invalid repeat mortgages. Auctions
   follow the standard rule that the player who declined the property may still
   bid.
+- Purchase and auction prompts identify the property, printed price, type,
+  relevant group ownership, and current cash. The printed price informs the
+  model's choice but does not cap a legal auction bid; the engine still
+  validates every proposed action and bid.
 - Full-set, unmortgaged-only house and hotel construction with even-building
   and selling enforcement, finite bank inventory, and mortgage restrictions.
 - Before each turn, the player endpoint may make validated asset-management
@@ -34,10 +38,10 @@ the app, rather than any model, is the authoritative rules engine.
   illegal, or timed-out optional asset decision is rejected without stopping
   automatic play.
 - If a payment makes a player insolvent, play pauses for that player to sell
-  buildings, mortgage eligible property, or make one exact trade offer. Only when it replies that it is
-  finished does the engine either resume the interrupted turn or process a
-  standard bankruptcy; it never eliminates a player merely for a temporary
-  negative balance.
+  buildings, mortgage eligible property, or make one exact trade offer. The
+  engine resumes the interrupted turn as soon as current cash covers the debt;
+  otherwise it waits for further legal liquidation or a bankruptcy decision.
+  It never eliminates a player merely for a temporary negative balance.
 - Validated cash/property trades, including the immediate interest required on
   transferred mortgaged property, and creditor/bank bankruptcy asset handling.
   A creditor inheriting a mortgaged property through bankruptcy likewise pays
@@ -66,16 +70,21 @@ the app, rather than any model, is the authoritative rules engine.
   terminals, external Hermes memories, or alter the rules engine directly.
 - Starting a game begins unthrottled automatic play: each active Hermes player
   receives one strict turn request at a time and the next request is made as
-  soon as its legal action resolves. **Stop Automatic Play** and **Ask Current
-  Player** remain available controls. Auctions use a separate strict `bid` or
-  `pass` JSON proposal per eligible player, and therefore continue
+  soon as its legal action resolves. **Stop Automatic Play** is available
+  between requests, and **Ask Current Player** supports manual prompting;
+  an in-flight model request cannot yet be cancelled from the UI. Auctions use
+  a separate strict `bid` or `pass` JSON proposal per eligible player, and
+  therefore continue
   automatically. The optional trade window uses a separate proposal followed
-  by an exact-offer acceptance, so automatic play continues afterward.
+  by an exact-offer acceptance, so automatic play continues afterward. While a
+  player decision is pending, the status line shows elapsed time; this is
+  observability only, not a hard timeout or cancellation control.
 - The live table includes a complete board view: player tokens move around the
   standard 40 spaces. Its central live scoreboard keeps the current phase,
   player, player-color key, cash, locations, and last roll visible, while the
   side panel retains the chronological table log. Select a board space to
-  inspect its price, owner, mortgage state, and development.
+  inspect its price, owner, mortgage state, and development. The Pink group
+  uses vivid magenta, visibly separate from the Red group's dots.
 - There is no deterministic built-in AI strategy and no ChatGPT connection yet:
   each connected endpoint decides its own legal strategy, informed only by the
   live table and its own local journal.
@@ -86,7 +95,7 @@ rule-edge-case auditing. No endpoint will receive general tool access.
 ## Build and test
 
 ```sh
-xcodebuild -project Monopolathy.xcodeproj -scheme Monopolathy -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO test
+xcodebuild -project Monopathy.xcodeproj -scheme Monopathy -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO test
 ```
 
 The project targets macOS 14 or later and does not require a powered-on remote
@@ -94,29 +103,48 @@ machine to build or run its offline lobby.
 
 ## Per-player strategy journals
 
-After a completed game, Monopolathy records a compact, personal outcome for
+After a completed game, Monopathy records a compact, personal outcome for
 each AI endpoint: win/loss, ending cash and holdings, color-group progress, and
-up to four engine-generated strategic events. The next time that endpoint is
+up to twelve categorized, engine-accepted strategic decisions (older journals
+retain their four-event summaries). The next time that endpoint is
 asked to make a turn, auction, trade, or asset decision, the most recent three
 outcomes are included as bounded historical context. The journal is durable
 prompt memory, not model retraining, and it never changes the rules engine or
 shares one player's history with another.
 
-On the Mac running Monopolathy, journals are stored outside the repository at:
+On the Mac running Monopathy, journals are stored outside the repository at:
 
-`~/Library/Application Support/Monopolathy/Strategy Journals/`
+`~/Library/Application Support/Monopathy/Strategy Journals/`
 
 There is one JSON file per endpoint, and each file retains at most eight game
 records. Deleting one of these files resets only that player's accumulated
 history.
 
+Each endpoint also has a separate `-profile.json` file with advisory strategy
+guidance. After a completed game, that endpoint's configured model may propose
+one short heuristic change. Proposals are kept as candidates, not automatically
+promoted. When a candidate exists, subsequent live games alternate between
+current and candidate guidance for that endpoint; the File menu's **Review
+Strategy Suggestions…** command shows each variant's observed win counts and
+lets you keep testing, approve, or discard the candidate. A few games are not
+enough to establish that one strategy is better, and there is no background
+tournament or model-weight training. Reviews may fail or time out without
+affecting the completed game. This mechanism does not change Hasbro rules or
+the engine's action validation. On the same Mac, Save/Load retains the
+in-progress game's strategy-variant assignment in the local profile file, so
+a resumed result is counted for the same variant. Moving only the game save
+to another Mac does not transfer strategy profiles.
+
 ## App bundle
 
-A freshly built Debug bundle is available at `dist/Monopolathy.app`. It is a
+A freshly built Debug bundle is available at `dist/Monopathy.app`. It is a
 copyable local artifact; rebuild it with the Debug scheme before distributing a
-newer version.
+newer version. When refreshing the bundle with `ditto`, touch the outer
+`dist/Monopathy.app` directory afterward so Finder notices the new app icon
+and metadata; copying only its contents can leave the bundle's old modification
+date and a stale generic Finder icon.
 
 
 ## Bundle identifier
 
-This project uses `net.quantumpenguin.Monopolathy`. Use the `net.quantumpenguin.*` namespace for new app and extension targets.
+This project uses `net.quantumpenguin.Monopathy`. Use the `net.quantumpenguin.*` namespace for new app and extension targets.

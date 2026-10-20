@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		111111111111111111111101 /* MonopolathyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111001 /* MonopolathyApp.swift */; };
+		111111111111111111111101 /* MonopathyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111001 /* MonopathyApp.swift */; };
 		111111111111111111111102 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111002 /* Models.swift */; };
 		111111111111111111111103 /* GameEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111003 /* GameEngine.swift */; };
 		111111111111111111111104 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111004 /* ContentView.swift */; };
@@ -15,7 +15,8 @@
 		111111111111111111111107 /* TurnProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111009 /* TurnProtocol.swift */; };
 		111111111111111111111108 /* AboutBoxController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111199 /* AboutBoxController.swift */; };
 		111111111111111111111109 /* StrategyJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111198 /* StrategyJournal.swift */; };
-		111111111111111111111105 /* MonopolathyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111005 /* MonopolathyTests.swift */; };
+		111111111111111111111105 /* MonopathyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111111111111111111111005 /* MonopathyTests.swift */; };
+		111111111111111111111110 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11111111111111111111100A /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,22 +25,23 @@
 			containerPortal = 111111111111111111111010 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 111111111111111111111020;
-			remoteInfo = Monopolathy;
+			remoteInfo = Monopathy;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		111111111111111111111001 /* MonopolathyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonopolathyApp.swift; sourceTree = "<group>"; };
+		111111111111111111111001 /* MonopathyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonopathyApp.swift; sourceTree = "<group>"; };
 		111111111111111111111002 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		111111111111111111111003 /* GameEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameEngine.swift; sourceTree = "<group>"; };
 		111111111111111111111004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		111111111111111111111005 /* MonopolathyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonopolathyTests.swift; sourceTree = "<group>"; };
+		111111111111111111111005 /* MonopathyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonopathyTests.swift; sourceTree = "<group>"; };
 		111111111111111111111008 /* StandardRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandardRules.swift; sourceTree = "<group>"; };
 		111111111111111111111009 /* TurnProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnProtocol.swift; sourceTree = "<group>"; };
 		111111111111111111111199 /* AboutBoxController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutBoxController.swift; sourceTree = "<group>"; };
 		111111111111111111111198 /* StrategyJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyJournal.swift; sourceTree = "<group>"; };
-		111111111111111111111006 /* Monopolathy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monopolathy.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		111111111111111111111007 /* MonopolathyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonopolathyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		111111111111111111111006 /* Monopathy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monopathy.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		111111111111111111111007 /* MonopathyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonopathyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		11111111111111111111100A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,16 +65,16 @@
 		111111111111111111111000 = {
 			isa = PBXGroup;
 			children = (
-				111111111111111111111040 /* Monopolathy */,
-				111111111111111111111140 /* MonopolathyTests */,
+				111111111111111111111040 /* Monopathy */,
+				111111111111111111111140 /* MonopathyTests */,
 				111111111111111111111050 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		111111111111111111111040 /* Monopolathy */ = {
+		111111111111111111111040 /* Monopathy */ = {
 			isa = PBXGroup;
 			children = (
-				111111111111111111111001 /* MonopolathyApp.swift */,
+				111111111111111111111001 /* MonopathyApp.swift */,
 				111111111111111111111002 /* Models.swift */,
 				111111111111111111111003 /* GameEngine.swift */,
 				111111111111111111111004 /* ContentView.swift */,
@@ -80,33 +82,34 @@
 				111111111111111111111009 /* TurnProtocol.swift */,
 				111111111111111111111199 /* AboutBoxController.swift */,
 				111111111111111111111198 /* StrategyJournal.swift */,
+				11111111111111111111100A /* Assets.xcassets */,
 			);
-			path = Monopolathy;
+			path = Monopathy;
 			sourceTree = "<group>";
 		};
 		111111111111111111111050 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				111111111111111111111006 /* Monopolathy.app */,
-				111111111111111111111007 /* MonopolathyTests.xctest */,
+				111111111111111111111006 /* Monopathy.app */,
+				111111111111111111111007 /* MonopathyTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		111111111111111111111140 /* MonopolathyTests */ = {
+		111111111111111111111140 /* MonopathyTests */ = {
 			isa = PBXGroup;
 			children = (
-				111111111111111111111005 /* MonopolathyTests.swift */,
+				111111111111111111111005 /* MonopathyTests.swift */,
 			);
-			path = MonopolathyTests;
+			path = MonopathyTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		111111111111111111111020 /* Monopolathy */ = {
+		111111111111111111111020 /* Monopathy */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 111111111111111111111060 /* Build configuration list for PBXNativeTarget "Monopolathy" */;
+			buildConfigurationList = 111111111111111111111060 /* Build configuration list for PBXNativeTarget "Monopathy" */;
 			buildPhases = (
 				111111111111111111111021 /* Sources */,
 				111111111111111111111030 /* Frameworks */,
@@ -117,14 +120,14 @@
 			);
 			dependencies = (
 			);
-			name = Monopolathy;
-			productName = Monopolathy;
-			productReference = 111111111111111111111006 /* Monopolathy.app */;
+			name = Monopathy;
+			productName = Monopathy;
+			productReference = 111111111111111111111006 /* Monopathy.app */;
 			productType = "com.apple.product-type.application";
 		};
-		111111111111111111111120 /* MonopolathyTests */ = {
+		111111111111111111111120 /* MonopathyTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 111111111111111111111160 /* Build configuration list for PBXNativeTarget "MonopolathyTests" */;
+			buildConfigurationList = 111111111111111111111160 /* Build configuration list for PBXNativeTarget "MonopathyTests" */;
 			buildPhases = (
 				111111111111111111111121 /* Sources */,
 				111111111111111111111130 /* Frameworks */,
@@ -135,9 +138,9 @@
 			dependencies = (
 				111111111111111111111202 /* PBXTargetDependency */,
 			);
-			name = MonopolathyTests;
-			productName = MonopolathyTests;
-			productReference = 111111111111111111111007 /* MonopolathyTests.xctest */;
+			name = MonopathyTests;
+			productName = MonopathyTests;
+			productReference = 111111111111111111111007 /* MonopathyTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
@@ -172,8 +175,8 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				111111111111111111111020 /* Monopolathy */,
-				111111111111111111111120 /* MonopolathyTests */,
+				111111111111111111111020 /* Monopathy */,
+				111111111111111111111120 /* MonopathyTests */,
 			);
 		};
 /* End PBXProject section */
@@ -183,6 +186,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				111111111111111111111110 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -219,7 +223,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				111111111111111111111101 /* MonopolathyApp.swift in Sources */,
+				111111111111111111111101 /* MonopathyApp.swift in Sources */,
 				111111111111111111111102 /* Models.swift in Sources */,
 				111111111111111111111103 /* GameEngine.swift in Sources */,
 				111111111111111111111104 /* ContentView.swift in Sources */,
@@ -234,7 +238,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				111111111111111111111105 /* MonopolathyTests.swift in Sources */,
+				111111111111111111111105 /* MonopathyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -243,7 +247,7 @@
 /* Begin PBXTargetDependency section */
 		111111111111111111111202 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 111111111111111111111020 /* Monopolathy */;
+			target = 111111111111111111111020 /* Monopathy */;
 			targetProxy = 111111111111111111111201 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -379,7 +383,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Monopolathy;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Monopathy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -402,7 +406,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Monopolathy;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Monopathy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -421,10 +425,10 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.MonopolathyTests;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.MonopathyTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monopolathy.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Monopolathy";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monopathy.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Monopathy";
 			};
 			name = Debug;
 		};
@@ -440,10 +444,10 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.MonopolathyTests;
+				PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.MonopathyTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monopolathy.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Monopolathy";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monopathy.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Monopathy";
 			};
 			name = Release;
 		};
@@ -459,7 +463,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		111111111111111111111060 /* Build configuration list for PBXNativeTarget "Monopolathy" */ = {
+		111111111111111111111060 /* Build configuration list for PBXNativeTarget "Monopathy" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				111111111111111111111061 /* Debug */,
@@ -468,7 +472,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		111111111111111111111160 /* Build configuration list for PBXNativeTarget "MonopolathyTests" */ = {
+		111111111111111111111160 /* Build configuration list for PBXNativeTarget "MonopathyTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				111111111111111111111161 /* Debug */,

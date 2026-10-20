@@ -121,7 +121,9 @@ final class GameEngine: ObservableObject {
                 return actions
             }
             return [.rollDice]
-        case .awaitingPurchase: return [.buyProperty, .declineProperty]
+        case .awaitingPurchase:
+            guard case let .offerPurchase(_, price) = pendingAction else { return [] }
+            return player.cash >= price ? [.buyProperty, .declineProperty] : [.declineProperty]
         case .trading, .auction: return []
         case .resolvingAI, .gameOver: return []
         }
@@ -179,8 +181,8 @@ final class GameEngine: ObservableObject {
         }
         switch action {
         case .rollDice, .attemptJailRoll: rollDice()
-        case .buyProperty: buyPendingProperty()
-        case .declineProperty: declinePendingProperty()
+        case .buyProperty: guard buyPendingProperty() else { return false }
+        case .declineProperty: guard declinePendingProperty() else { return false }
         case .payJailFine: payJailFine()
         case .useGetOutOfJailFree: useGetOutOfJailFree()
         case .endTurn: endTurn()
@@ -221,6 +223,7 @@ final class GameEngine: ObservableObject {
 
         doublesThisTurn = doubles ? doublesThisTurn + 1 : 0
         if doublesThisTurn == 3 {
+            append("\(player.name) rolled \(roll.0)+\(roll.1) (third consecutive doubles).")
             sendToJail(playerID: player.id, reason: "three consecutive doubles")
             endTurn()
             return
@@ -263,22 +266,24 @@ final class GameEngine: ObservableObject {
         }
     }
 
-    private func buyPendingProperty() {
-        guard case let .offerPurchase(spaceID, price) = pendingAction, let index = players.indices.contains(currentPlayerIndex) ? currentPlayerIndex : nil, players[index].cash >= price else { return }
+    private func buyPendingProperty() -> Bool {
+        guard case let .offerPurchase(spaceID, price) = pendingAction, let index = players.indices.contains(currentPlayerIndex) ? currentPlayerIndex : nil, players[index].cash >= price else { return false }
         players[index].cash -= price
         players[index].properties.insert(spaceID)
         append("\(players[index].name) bought \(board[spaceID].name) for $\(price).")
         pendingAction = .none
         pendingExtraRoll ? beginExtraRoll() : endTurn()
         pendingExtraRoll = false
+        return true
     }
 
-    private func declinePendingProperty() {
-        guard case let .offerPurchase(spaceID, _) = pendingAction, let player = currentPlayer else { return }
+    private func declinePendingProperty() -> Bool {
+        guard case let .offerPurchase(spaceID, _) = pendingAction, let player = currentPlayer else { return false }
         append("\(player.name) declined \(board[spaceID].name). Auction opened.")
         pendingAction = .none
         auction = AuctionState(spaceID: spaceID, excludedPlayerID: nil, leadingBidderID: nil, leadingBid: 0, passedPlayerIDs: [])
         phase = .auction
+        return true
     }
 
     @discardableResult
@@ -613,6 +618,16 @@ final class GameEngine: ObservableObject {
         return true
     }
 
+    /// Resume the interrupted turn as soon as a trade or liquidation action
+    /// has covered the debt. Always read the current player state, because a
+    /// Player value captured before mortgaging still contains the old cash.
+    @discardableResult
+    func resolveOutstandingDebtIfCovered(by playerID: UUID) -> Bool {
+        guard outstandingDebt?.playerID == playerID,
+              let player = player(withID: playerID), player.cash >= 0 else { return false }
+        return resolveOutstandingDebt(by: playerID)
+    }
+
     /// After any voluntary trade opportunity, a player with no legal way to
     /// sell buildings or mortgage property has exhausted the asset-management
     /// choices Monopoly permits and must proceed to bankruptcy.
@@ -653,7 +668,7 @@ final class GameEngine: ObservableObject {
     private func owner(of spaceID: Int) -> Player? { players.first { $0.properties.contains(spaceID) } }
     private func player(withID id: UUID) -> Player? { players.first { $0.id == id } }
     private func update(_ player: Player) { if let index = players.firstIndex(where: { $0.id == player.id }) { players[index] = player } }
-    private func append(_ text: String) { log.insert(GameLogEntry(text: text), at: 0) }
+    private func append(_ text: String) { log.insert(GameLogEntry(text: GameLogEntry.displayText(for: text)), at: 0) }
 
     private func returnGetOutOfJailFreeCard(to deck: CardDeck) {
         guard let card = MonopolyCard.standardDeck.first(where: { $0.deck == deck && $0.effect == .getOutOfJailFree }) else { return }

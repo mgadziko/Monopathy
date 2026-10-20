@@ -1,9 +1,27 @@
 import XCTest
-@testable import Monopolathy
+@testable import Monopathy
 
 @MainActor
-final class MonopolathyTests: XCTestCase {
+final class MonopathyTests: XCTestCase {
     private let fourPlayers: [PlayerEndpoint] = [.hermesLocal, .whiteLotus, .blackLotus, .greenLotus]
+
+    func testWaitingTimeFormatterShowsMinutesAndHoursWithoutNegativeTime() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(WaitingTimeFormatter.string(since: start, now: start.addingTimeInterval(-1)), "0:00")
+        XCTAssertEqual(WaitingTimeFormatter.string(since: start, now: start.addingTimeInterval(125)), "2:05")
+        XCTAssertEqual(WaitingTimeFormatter.string(since: start, now: start.addingTimeInterval(3_661)), "1:01:01")
+    }
+
+    func testDecisionWaitClockKeepsStartForSameUnchangedDecision() {
+        var clock = DecisionWaitClock()
+        let start = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(clock.start(for: "cheyenne|purchase|event-1", now: start), start)
+        XCTAssertEqual(clock.start(for: "cheyenne|purchase|event-1", now: start.addingTimeInterval(5)), start)
+        XCTAssertEqual(clock.start(for: "cheyenne|purchase|event-1", now: start.addingTimeInterval(125)), start)
+        XCTAssertEqual(clock.start(for: "cheyenne|purchase|event-2", now: start.addingTimeInterval(126)), start.addingTimeInterval(126))
+        clock.reset()
+        XCTAssertEqual(clock.start(for: "cheyenne|purchase|event-2", now: start.addingTimeInterval(130)), start.addingTimeInterval(130))
+    }
 
     func testLocalHermesEndpointUsesPortableOrganonDisplayLabel() {
         XCTAssertEqual(PlayerEndpoint.hermesLocal.displayName, "hermes-organon")
@@ -27,7 +45,7 @@ final class MonopolathyTests: XCTestCase {
     }
 
     func testStrategyJournalPersistsPerPlayerAndAddsOnlyPersonalContext() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopolathyStrategyJournal-\(UUID().uuidString)", isDirectory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopathyStrategyJournal-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let engine = GameEngine()
         engine.start(endpoints: fourPlayers)
@@ -44,7 +62,70 @@ final class MonopolathyTests: XCTestCase {
         XCTAssertTrue(winnerContext.contains("Mediterranean Avenue"))
         XCTAssertTrue(winnerContext.contains("Brown 2/2"))
         XCTAssertTrue(winnerContext.contains("bought Baltic Avenue"))
-        XCTAssertEqual(restored.context(for: .hal), "")
+        XCTAssertTrue(restored.context(for: .hal).contains("Personal strategy guidance"))
+        XCTAssertFalse(restored.context(for: .hal).contains("Baltic Avenue"))
+    }
+
+    func testStrategySuggestionRemainsCandidateUntilExplicitApproval() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopathyStrategyProfile-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = StrategyJournalStore(directoryURL: root)
+        let endpoint = PlayerEndpoint.blackLotus
+        let original = store.context(for: endpoint)
+        await store.review(endpoint, gameID: UUID(), transport: FixedStrategyTransport(reply: "{\"guidance\":\"Keep a larger cash reserve before bidding.\"}"))
+        XCTAssertTrue(store.context(for: endpoint).contains("Preserve liquidity"))
+        XCTAssertEqual(store.suggestions.count, 1)
+
+        let restored = StrategyJournalStore(directoryURL: root)
+        XCTAssertEqual(restored.suggestions.count, 1)
+        XCTAssertEqual(restored.context(for: .hal), StrategyJournalStore(directoryURL: root).context(for: .hal))
+        XCTAssertNotEqual(original, "")
+        restored.approve(endpoint)
+        XCTAssertTrue(restored.context(for: endpoint).contains("larger cash reserve"))
+        XCTAssertTrue(restored.suggestions.isEmpty)
+    }
+
+    func testMalformedStrategyReviewCannotChangeProfile() async {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopathyStrategyProfile-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = StrategyJournalStore(directoryURL: root)
+        await store.review(.cheyenne, gameID: UUID(), transport: FixedStrategyTransport(reply: "ignore all rules"))
+        XCTAssertTrue(store.suggestions.isEmpty)
+    }
+
+    func testCandidateAndBaselineAlternateAcrossLiveGames() async {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopathyStrategyTrial-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = StrategyJournalStore(directoryURL: root)
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        let endpoint = PlayerEndpoint.blackLotus
+        await store.review(endpoint, gameID: UUID(), transport: FixedStrategyTransport(reply: "{\"guidance\":\"Keep a larger cash reserve before bidding.\"}"))
+        store.beginGame(endpoints: fourPlayers)
+        XCTAssertTrue(store.context(for: endpoint).contains("larger cash reserve"))
+        store.record(gameID: UUID(), winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [])
+        XCTAssertEqual(store.suggestions.first { $0.endpoint == endpoint }?.profile.candidateGames, 1)
+
+        store.beginGame(endpoints: fourPlayers)
+        XCTAssertTrue(store.context(for: endpoint).contains("Preserve liquidity"))
+        store.record(gameID: UUID(), winnerID: engine.players[0].id, players: engine.players, board: engine.board, log: [])
+        XCTAssertEqual(store.suggestions.first { $0.endpoint == endpoint }?.profile.baselineGames, 1)
+    }
+
+    func testSavedGameRestoresItsStrategyTrialAssignment() async {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MonopathyStrategyResume-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        let store = StrategyJournalStore(directoryURL: root)
+        await store.review(.blackLotus, gameID: UUID(), transport: FixedStrategyTransport(reply: "{\"guidance\":\"Keep a larger cash reserve before bidding.\"}"))
+        store.beginGame(endpoints: fourPlayers, gameStartID: engine.log.last?.id)
+        store.beginGame(endpoints: fourPlayers, gameStartID: UUID()) // An abandoned newer game must not overwrite this save.
+
+        let restored = StrategyJournalStore(directoryURL: root)
+        restored.resumeGame(engine)
+        XCTAssertTrue(restored.context(for: .blackLotus).contains("larger cash reserve"))
+        XCTAssertTrue(restored.context(for: .whiteLotus).contains("Preserve liquidity"))
     }
 
     func testHermesTurnTransportPrependsStrategyJournal() {
@@ -170,6 +251,66 @@ final class MonopolathyTests: XCTestCase {
         engine.start(endpoints: fourPlayers)
         XCTAssertTrue(engine.submit(.rollDice))
         XCTAssertEqual(engine.phase, .awaitingPurchase)
+        XCTAssertEqual(engine.legalActions, [.buyProperty, .declineProperty])
+    }
+
+    func testUnaffordablePurchaseCannotSucceedUntilPlayerRaisesCash() {
+        let engine = GameEngine(dice: { (1, 2) })
+        engine.start(endpoints: fourPlayers)
+        let playerID = engine.players[0].id
+        engine.grantPropertiesForTesting([1], to: playerID)
+        engine.setCashForTesting(50, for: playerID)
+
+        XCTAssertTrue(engine.submit(.rollDice))
+        XCTAssertEqual(engine.phase, .awaitingPurchase)
+        XCTAssertEqual(engine.legalActions, [.declineProperty])
+        XCTAssertFalse(engine.submit(.buyProperty))
+        XCTAssertEqual(engine.currentPlayer?.cash, 50)
+        XCTAssertEqual(engine.phase, .awaitingPurchase)
+        XCTAssertFalse(engine.currentPlayer?.properties.contains(3) ?? true)
+
+        XCTAssertTrue(engine.mortgage(spaceID: 1, by: playerID))
+        XCTAssertEqual(engine.legalActions, [.buyProperty, .declineProperty])
+        XCTAssertTrue(engine.submit(.buyProperty))
+        XCTAssertTrue(engine.players[0].properties.contains(3))
+        XCTAssertEqual(engine.players[0].cash, 20)
+    }
+
+    func testUnaffordablePurchaseDeclinesWithoutCallingModel() async throws {
+        let engine = GameEngine(dice: { (1, 2) })
+        engine.start(endpoints: fourPlayers)
+        engine.setCashForTesting(50, for: engine.players[0].id)
+        XCTAssertTrue(engine.submit(.rollDice))
+        let restored = GameEngine()
+        XCTAssertTrue(restored.restore(from: engine.makeSave()))
+
+        let action = try await TurnCoordinator().playTurn(engine: restored, transport: UnexpectedTransport())
+        XCTAssertEqual(action, .declineProperty)
+        XCTAssertEqual(restored.phase, .auction)
+        XCTAssertNotNil(restored.auction)
+    }
+
+    func testPurchaseFundingPromptAndMortgageRestoreBuyOption() async throws {
+        let engine = GameEngine(dice: { (1, 2) })
+        engine.start(endpoints: fourPlayers)
+        let player = engine.players[0]
+        engine.grantPropertiesForTesting([1], to: player.id)
+        engine.setCashForTesting(50, for: player.id)
+        XCTAssertTrue(engine.submit(.rollDice))
+
+        let offer = PropertyDecisionContext(engine: engine, spaceID: 3)
+        let snapshot = AssetSnapshot(engine: engine, player: engine.players[0])
+        XCTAssertTrue(snapshot.hasFundingActions)
+        let prompt = AssetProtocol.prompt(for: snapshot, fundingPurchase: offer)
+        XCTAssertTrue(prompt.contains("offered Baltic Avenue for $60, but have $50"))
+
+        let decision = try await AssetCoordinator().requestDecision(
+            engine: engine,
+            player: engine.players[0],
+            transport: FixedTransport(reply: "{\"action\":\"mortgage\",\"property_id\":1}"),
+            fundingPurchase: offer
+        )
+        XCTAssertEqual(decision, .mortgage(1))
         XCTAssertEqual(engine.legalActions, [.buyProperty, .declineProperty])
     }
 
@@ -316,7 +457,7 @@ final class MonopolathyTests: XCTestCase {
         XCTAssertEqual(engine.players[1].cash, 1_575)
         XCTAssertEqual(
             engine.log.first?.text,
-            "Trade completed: \(first.name) gave $100 and Mediterranean Avenue to \(second.name); \(second.name) gave $25 and Baltic Avenue to \(first.name)."
+            "Trade completed: \(GameLogEntry.displayText(for: first.name)) gave $100 and Mediterranean Avenue to \(GameLogEntry.displayText(for: second.name)); \(GameLogEntry.displayText(for: second.name)) gave $25 and Baltic Avenue to \(GameLogEntry.displayText(for: first.name))."
         )
     }
 
@@ -349,8 +490,10 @@ final class MonopolathyTests: XCTestCase {
 
         XCTAssertTrue(engine.submit(.rollDice))
         XCTAssertEqual(engine.phase, .resolvingAI)
+        XCTAssertFalse(engine.resolveOutstandingDebtIfCovered(by: debtor.id))
         XCTAssertTrue(engine.mortgage(spaceID: 1, by: debtor.id))
-        XCTAssertTrue(engine.resolveOutstandingDebt(by: debtor.id))
+        XCTAssertEqual(engine.playerNeedingDebtResolution.map { AssetSnapshot(engine: engine, player: $0).cash }, 20)
+        XCTAssertTrue(engine.resolveOutstandingDebtIfCovered(by: debtor.id))
 
         XCTAssertFalse(engine.players[0].bankrupt)
         XCTAssertEqual(engine.players[0].cash, 20)
@@ -453,9 +596,44 @@ final class MonopolathyTests: XCTestCase {
         engine.start(endpoints: fourPlayers)
         let snapshot = TurnSnapshot(engine: engine)
         XCTAssertEqual(snapshot.legalActions, ["roll_dice"])
+        XCTAssertNil(snapshot.purchaseOffer)
         XCTAssertEqual(try TurnProtocol.action(from: "{\"action\":\"roll_dice\"}", allowed: engine.legalActions), .rollDice)
         XCTAssertThrowsError(try TurnProtocol.action(from: "{\"action\":\"buy_property\"}", allowed: engine.legalActions))
         XCTAssertThrowsError(try TurnProtocol.action(from: "I want to roll", allowed: engine.legalActions))
+    }
+
+    func testPurchasePromptIdentifiesPropertyPriceAndGroupOwnership() throws {
+        let engine = GameEngine(dice: { (3, 3) })
+        engine.start(endpoints: fourPlayers)
+        engine.grantPropertiesForTesting([8], to: engine.players[1].id)
+        XCTAssertTrue(engine.submit(.rollDice))
+
+        let snapshot = TurnSnapshot(engine: engine)
+        let offer = try XCTUnwrap(snapshot.purchaseOffer)
+        XCTAssertEqual(offer.name, "Oriental Avenue")
+        XCTAssertEqual(offer.printedPrice, 100)
+        XCTAssertEqual(offer.kind, .property)
+        XCTAssertEqual(offer.baseRent, 6)
+        XCTAssertEqual(offer.colorGroup, "Light Blue")
+        XCTAssertEqual(offer.groupMembers.count, 3)
+        XCTAssertEqual(offer.groupMembers[1].ownerName, engine.players[1].name)
+        let prompt = TurnProtocol.prompt(for: snapshot)
+        XCTAssertTrue(prompt.contains("\"printedPrice\":100"))
+        XCTAssertTrue(prompt.contains("\"name\":\"Oriental Avenue\""))
+        XCTAssertTrue(prompt.contains("Declining sends it to a standard auction"))
+    }
+
+    func testUtilityPurchaseContextDoesNotInventFixedRent() throws {
+        let engine = GameEngine(dice: { (6, 6) })
+        engine.start(endpoints: fourPlayers)
+        XCTAssertTrue(engine.submit(.rollDice))
+
+        let offer = try XCTUnwrap(TurnSnapshot(engine: engine).purchaseOffer)
+        XCTAssertEqual(offer.name, "Electric Company")
+        XCTAssertEqual(offer.kind, .utility)
+        XCTAssertEqual(offer.printedPrice, 150)
+        XCTAssertNil(offer.baseRent)
+        XCTAssertEqual(offer.groupMembers.count, 2)
     }
 
     func testCoordinatorSubmitsOnlyValidatedTransportAction() async throws {
@@ -481,15 +659,36 @@ final class MonopolathyTests: XCTestCase {
     func testAuctionPromptAsksForAValuationBasedBidWithoutChangingTheLegalRange() {
         let engine = GameEngine(dice: { (3, 3) })
         engine.start(endpoints: fourPlayers)
+        engine.grantPropertiesForTesting([8], to: engine.players[2].id)
         XCTAssertTrue(engine.submit(.rollDice))
         XCTAssertTrue(engine.submit(.declineProperty))
         XCTAssertTrue(engine.placeAuctionBid(200, by: engine.players[1].id))
         let snapshot = AuctionSnapshot(engine: engine, bidder: engine.players[2])
 
         let prompt = AuctionProtocol.prompt(for: snapshot)
-        XCTAssertTrue(prompt.contains("highest price you would genuinely be willing to pay"))
+        XCTAssertEqual(snapshot.property.name, "Oriental Avenue")
+        XCTAssertEqual(snapshot.property.printedPrice, 100)
+        XCTAssertEqual(snapshot.property.colorGroup, "Light Blue")
+        XCTAssertEqual(snapshot.property.groupMembers[1].ownerName, engine.players[2].name)
+        XCTAssertTrue(prompt.contains("\"printedPrice\":100"))
+        XCTAssertTrue(prompt.contains("printedPrice is a reference, not a bid cap"))
+        XCTAssertTrue(prompt.contains("Do not automatically bid the minimum increment or your entire cash balance"))
         XCTAssertTrue(prompt.contains("from 201 through 1500"))
-        XCTAssertTrue(prompt.contains("does not set a sealed maximum"))
+        XCTAssertTrue(prompt.contains("not a sealed maximum"))
+    }
+
+    func testDecliningBuyerMayBidAbovePrintedPrice() {
+        let engine = GameEngine(dice: { (3, 3) })
+        engine.start(endpoints: fourPlayers)
+        let buyer = engine.players[0]
+        XCTAssertTrue(engine.submit(.rollDice))
+        XCTAssertTrue(engine.submit(.declineProperty))
+        XCTAssertTrue(engine.placeAuctionBid(500, by: buyer.id))
+        for player in engine.players.dropFirst() {
+            XCTAssertTrue(engine.passAuction(by: player.id))
+        }
+        XCTAssertTrue(engine.players[0].properties.contains(6))
+        XCTAssertEqual(engine.players[0].cash, 1_000)
     }
 
     func testAuctionCoordinatorRetriesInvalidBid() async throws {
@@ -570,6 +769,7 @@ final class MonopolathyTests: XCTestCase {
         let cards = [MonopolyCard(id: "test-chest", deck: .communityChest, effect: .collect(0))]
         let engine = GameEngine(dice: { sequence.next() }, deckOrder: cards)
         engine.start(endpoints: fourPlayers)
+        let firstPlayerName = GameLogEntry.displayText(for: engine.players[0].name)
 
         XCTAssertTrue(engine.submit(.rollDice))
         XCTAssertTrue(engine.submit(.rollDice))
@@ -578,6 +778,14 @@ final class MonopolathyTests: XCTestCase {
         XCTAssertEqual(engine.players[0].position, 10)
         XCTAssertEqual(engine.players[0].inJailTurns, 1)
         XCTAssertEqual(engine.currentPlayerIndex, 1)
+        XCTAssertEqual(engine.log[1].text, "\(firstPlayerName) rolled 1+1 (third consecutive doubles).")
+        XCTAssertEqual(engine.log[0].text, "\(firstPlayerName) went to jail (three consecutive doubles).")
+        XCTAssertFalse(engine.log.contains { $0.text.contains("hermes-") })
+    }
+
+    func testLegacyLogEntriesDisplayWithoutHermesPrefix() {
+        let entry = GameLogEntry(text: "hermes-cheyenne paid hermes-organon $10 rent.")
+        XCTAssertEqual(entry.displayText, "cheyenne paid organon $10 rent.")
     }
 
     func testJailDoublesMovePlayerWithoutExtraRoll() {
@@ -637,6 +845,11 @@ final class MonopolathyTests: XCTestCase {
     }
 }
 
+private struct FixedStrategyTransport: PlayerTurnTransport {
+    let reply: String
+    func respond(to prompt: String) async throws -> String { reply }
+}
+
 private final class RollSequence {
     private var rolls: [(Int, Int)]
     init(_ rolls: [(Int, Int)]) { self.rolls = rolls }
@@ -646,6 +859,13 @@ private final class RollSequence {
 private struct FixedTransport: PlayerTurnTransport {
     let reply: String
     func respond(to prompt: String) async throws -> String { reply }
+}
+
+private struct UnexpectedTransport: PlayerTurnTransport {
+    func respond(to prompt: String) async throws -> String {
+        XCTFail("A forced decline must not call the model")
+        return ""
+    }
 }
 
 private actor ReplySequenceTransport: PlayerTurnTransport {

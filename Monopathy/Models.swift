@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// A player is a decision-making endpoint. It never owns game state: the
-/// Monopolathy rules engine remains the sole authority for every action.
+/// Monopathy rules engine remains the sole authority for every action.
 enum PlayerEndpoint: String, CaseIterable, Identifiable, Codable {
     case hermesLocal = "hermes-local"
     case whiteLotus = "hermes-whitelotus"
@@ -139,6 +139,12 @@ struct Player: Identifiable, Codable, Equatable {
 struct GameLogEntry: Identifiable, Codable, Equatable {
     let id: UUID
     let text: String
+
+    var displayText: String { Self.displayText(for: text) }
+
+    static func displayText(for text: String) -> String {
+        text.replacingOccurrences(of: "hermes-", with: "")
+    }
 
     init(id: UUID = UUID(), text: String) {
         self.id = id
