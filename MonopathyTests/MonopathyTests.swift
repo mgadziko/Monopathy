@@ -779,6 +779,40 @@ final class MonopathyTests: XCTestCase {
         XCTAssertEqual(engine.players[1].cash, 1_400)
     }
 
+    func testTradePromptsShowReciprocalColorSetOpportunitiesToBothPlayers() {
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        let proposer = engine.players[0]
+        let recipient = engine.players[1]
+        engine.grantPropertiesForTesting([6, 8, 11], to: proposer.id)
+        engine.grantPropertiesForTesting([9, 13, 14], to: recipient.id)
+
+        let snapshot = TradeSnapshot(engine: engine, proposer: proposer)
+        let lightBlue = snapshot.colorGroups.first { $0.name == "Light Blue" }
+        let pink = snapshot.colorGroups.first { $0.name == "Pink" }
+        XCTAssertEqual(lightBlue?.propertyIDs, [6, 8, 9])
+        XCTAssertEqual(lightBlue?.holdings.first { $0.playerID == proposer.id }?.propertyIDs, [6, 8])
+        XCTAssertEqual(lightBlue?.holdings.first { $0.playerID == recipient.id }?.propertyIDs, [9])
+        XCTAssertEqual(pink?.holdings.first { $0.playerID == proposer.id }?.propertyIDs, [11])
+        XCTAssertEqual(pink?.holdings.first { $0.playerID == recipient.id }?.propertyIDs, [13, 14])
+        XCTAssertEqual(snapshot.propertyPrices[9], 120)
+        XCTAssertFalse(snapshot.unownedPropertyIDs.contains(9))
+
+        let proposalPrompt = TradeProtocol.proposalPrompt(for: snapshot)
+        XCTAssertTrue(proposalPrompt.contains("mutually attractive exchange"))
+        XCTAssertTrue(proposalPrompt.contains("completing a color group"))
+        XCTAssertTrue(proposalPrompt.contains("\"name\":\"Light Blue\""))
+        XCTAssertTrue(proposalPrompt.contains("\"name\":\"Pink\""))
+
+        let offer = TradeOffer(fromPlayerID: proposer.id, toPlayerID: recipient.id, fromCash: 0, toCash: 0, fromProperties: [11], toProperties: [9])
+        let responsePrompt = TradeProtocol.responsePrompt(for: offer, engine: engine)
+        XCTAssertTrue(responsePrompt.contains("You receive: $0, properties [St. Charles Place]."))
+        XCTAssertTrue(responsePrompt.contains("You give: $0, properties [Connecticut Avenue]."))
+        XCTAssertTrue(responsePrompt.contains("\"name\":\"Light Blue\""))
+        XCTAssertTrue(responsePrompt.contains("\"name\":\"Pink\""))
+        XCTAssertTrue(engine.canExecuteTrade(offer))
+    }
+
     func testAssetCoordinatorAppliesOnlyValidatedMortgage() async throws {
         let engine = GameEngine()
         engine.start(endpoints: fourPlayers)

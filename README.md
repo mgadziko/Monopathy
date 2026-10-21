@@ -55,6 +55,10 @@ and releases happen here.
   transferred mortgaged property, and creditor/bank bankruptcy asset handling.
   A creditor inheriting a mortgaged property through bankruptcy likewise pays
   the standard immediate 10% mortgage interest to the Bank.
+- Trade proposals and responses include color-group holdings, property prices,
+  mortgages, and improvements. The prompts encourage both players to consider
+  mutually useful set-building exchanges instead of reflexively passing, but
+  never force a trade or change the engine's legality checks.
 - If a player owes the Bank and goes bankrupt, their returned properties are
   automatically auctioned to the remaining players before normal turn flow
   resumes; a mortgage on a returned property is cleared by its return.

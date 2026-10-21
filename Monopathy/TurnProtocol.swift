@@ -314,16 +314,49 @@ struct TradeSnapshot: Codable, Equatable {
         let properties: [Int]
     }
 
+    struct ColorGroupState: Codable, Equatable {
+        struct Holding: Codable, Equatable {
+            let playerID: UUID
+            let playerName: String
+            let propertyIDs: [Int]
+        }
+
+        let name: String
+        let propertyIDs: [Int]
+        let holdings: [Holding]
+    }
+
     let proposerID: UUID
     let proposerName: String
     let players: [PlayerState]
     let propertyNames: [Int: String]
+    let propertyPrices: [Int: Int]
+    let colorGroups: [ColorGroupState]
+    let unownedPropertyIDs: [Int]
+    let mortgagedPropertyIDs: [Int]
+    let improvedPropertyIDs: [Int]
 
     @MainActor init(engine: GameEngine, proposer: Player) {
         proposerID = proposer.id
         proposerName = proposer.name
-        players = engine.players.filter { !$0.bankrupt }.map { .init(id: $0.id, name: $0.name, cash: $0.cash, properties: $0.properties.sorted()) }
-        propertyNames = Dictionary(uniqueKeysWithValues: engine.board.filter(\.isPurchasable).map { ($0.id, $0.name) })
+        let activePlayers = engine.players.filter { !$0.bankrupt }
+        let purchasable = engine.board.filter(\.isPurchasable)
+        let ownedIDs = Set(activePlayers.flatMap(\.properties))
+        players = activePlayers.map { .init(id: $0.id, name: $0.name, cash: $0.cash, properties: $0.properties.sorted()) }
+        propertyNames = Dictionary(uniqueKeysWithValues: purchasable.map { ($0.id, $0.name) })
+        propertyPrices = Dictionary(uniqueKeysWithValues: purchasable.map { ($0.id, $0.price) })
+        unownedPropertyIDs = purchasable.map(\.id).filter { !ownedIDs.contains($0) }
+        mortgagedPropertyIDs = engine.mortgagedSpaceIDs.sorted()
+        improvedPropertyIDs = engine.buildingsBySpaceID.filter { $0.value > 0 }.map(\.key).sorted()
+        let groups = Dictionary(grouping: engine.board.filter { $0.kind == .property && $0.colorGroup != nil }, by: { $0.colorGroup ?? "" })
+        colorGroups = groups.keys.sorted().map { name in
+            let propertyIDs = (groups[name] ?? []).map(\.id).sorted()
+            let holdings = activePlayers.compactMap { player -> ColorGroupState.Holding? in
+                let held = propertyIDs.filter { player.properties.contains($0) }
+                return held.isEmpty ? nil : .init(playerID: player.id, playerName: player.name, propertyIDs: held)
+            }
+            return .init(name: name, propertyIDs: propertyIDs, holdings: holdings)
+        }
     }
 }
 
@@ -371,7 +404,9 @@ enum TradeProtocol {
         encoder.outputFormatting = [.sortedKeys]
         let state = String(data: (try? encoder.encode(snapshot)) ?? Data(), encoding: .utf8) ?? "{}"
         return """
-        You are \(snapshot.proposerName), playing standard-rules Monopoly. If your cash is negative, this is your opportunity to raise funds before bankruptcy; otherwise, before your turn you may make exactly one voluntary trade offer, or make no offer. Strategy is entirely yours. The game will validate ownership, cash, unimproved properties, and mortgage-transfer costs.
+        You are \(snapshot.proposerName), playing standard-rules Monopoly. If your cash is negative, this is your opportunity to raise funds before bankruptcy; otherwise, before your turn you may make exactly one voluntary trade offer, or make no offer. Strategy is yours; no trade is required.
+
+        Before choosing no_trade, actively look for a mutually attractive exchange. Split color groups can leave rents small relative to the $200 collected for passing GO; completing a color group can enable houses and much higher rent. Use colorGroups to find missing properties and consider cash-for-property, property swaps, or swaps plus cash that improve both players' positions. A printed property price is context, not a trade-value ceiling. Protect enough cash for rent and building, and avoid giving an opponent a strong monopoly without adequate compensation. If no plausible legal offer benefits you and has a reason for the recipient to accept, choose no_trade. The game validates ownership, cash, unimproved properties, and mortgage-transfer costs; your advice cannot change its rules.
 
         Table state JSON:
         \(state)
@@ -387,12 +422,19 @@ enum TradeProtocol {
         let propertyNames = Dictionary(uniqueKeysWithValues: engine.board.filter(\.isPurchasable).map { ($0.id, $0.name) })
         let offered = offer.fromProperties.sorted().map { propertyNames[$0] ?? "#\($0)" }.joined(separator: ", ")
         let requested = offer.toProperties.sorted().map { propertyNames[$0] ?? "#\($0)" }.joined(separator: ", ")
-        let proposer = engine.players.first(where: { $0.id == offer.fromPlayerID })?.name ?? "Opponent"
+        let proposer = engine.players.first(where: { $0.id == offer.fromPlayerID })
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let state = proposer.flatMap { try? encoder.encode(TradeSnapshot(engine: engine, proposer: $0)) }
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return """
-        You are considering a standard-rules Monopoly trade offered by \(proposer).
+        You are considering a standard-rules Monopoly trade offered by \(proposer?.name ?? "Opponent").
         You receive: $\(offer.fromCash), properties [\(offered)].
         You give: $\(offer.toCash), properties [\(requested)].
-        Decide strategy yourself. The game validates the offer; you can only accept this exact offer or decline it.
+        Inspect the colorGroups and cash below. Ask whether this exact exchange completes a set, improves your path to one, preserves useful liquidity, or compensates you for improving the other player. Declining every trade can leave all players with low undeveloped rent, but do not accept a bad offer merely to speed up the game. Decide strategy yourself. The game validates the offer; you can only accept this exact offer or decline it.
+
+        Table state JSON:
+        \(state)
 
         Reply with exactly one JSON object and no Markdown or explanation:
         {"action":"accept"}
