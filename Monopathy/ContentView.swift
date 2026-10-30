@@ -174,7 +174,7 @@ struct ContentView: View {
             }
             HStack {
                 ForEach(game.legalActions, id: \.self) { action in
-                    Button(actionTitle(action)) { game.submit(action) }.buttonStyle(.borderedProminent)
+                    Button(actionTitle(action)) { submitManualAction(action) }.buttonStyle(.borderedProminent)
                 }
                 Spacer()
                 Button {
@@ -199,6 +199,8 @@ struct ContentView: View {
                 Button("New Game") {
                     isAutoPlaying = false
                     session.decisionWaitClock.reset()
+                    waitingStartedAt = nil
+                    playerTurnStatus = nil
                     tradeWindowPlayerID = nil
                     assetWindowPlayerID = nil
                     purchaseFundingWindowPlayerID = nil
@@ -387,6 +389,16 @@ struct ContentView: View {
         }
     }
 
+    @MainActor private func submitManualAction(_ action: GameAction) {
+        guard let result = ManualTurnSubmission.submit(action, to: game) else {
+            playerTurnStatus = "That action is no longer legal."
+            return
+        }
+        session.decisionWaitClock.reset()
+        waitingStartedAt = nil
+        playerTurnStatus = result.status(actionTitle: actionTitle(action))
+    }
+
     @MainActor private func beginWaiting(_ status: String) {
         isAskingPlayer = true
         let decisionKey = [
@@ -415,7 +427,7 @@ struct ContentView: View {
     @MainActor private func askCurrentPlayer() async -> Bool {
         guard let player = game.currentPlayer else { return false }
         guard await managePurchaseFundingIfNeeded() else { return false }
-        guard player.endpoint.hermesProfileName != nil else {
+        guard game.legalActions.count == 1 || player.endpoint.hermesProfileName != nil else {
             playerTurnStatus = "ChatGPT connection is not configured yet."
             return false
         }
@@ -533,6 +545,7 @@ struct ContentView: View {
         assetWindowPlayerID = player.id
         guard player.endpoint.hermesProfileName != nil else { playerTurnStatus = "ChatGPT connection is not configured yet."; return false }
         var seenAssetStates = Set<String>()
+        var assetHistory = OptionalAssetHistory()
         for _ in 0..<40 {
             guard let currentPlayer = game.currentPlayer else { return false }
             let encoder = JSONEncoder()
@@ -549,6 +562,10 @@ struct ContentView: View {
             do {
                 let decision = try await AssetCoordinator().requestDecision(engine: game, player: currentPlayer, transport: strategyTransport(for: currentPlayer.endpoint))
                 if decision == .done { return true }
+                if let reversedID = assetHistory.record(decision) {
+                    playerTurnStatus = "\(player.name) reversed a mortgage on \(game.board[reversedID].name); ending optional asset decisions for this turn."
+                    return true
+                }
             } catch {
                 if OptionalDecisionPolicy.shouldContinueAfterOptionalAssetFailure(error) {
                     let outcome = OptionalDecisionPolicy.shouldContinueAfterOptionalFailure(error) ? "timed out" : "was rejected"
@@ -572,6 +589,7 @@ struct ContentView: View {
         purchaseFundingWindowPlayerID = player.id
         let offer = PropertyDecisionContext(engine: game, spaceID: spaceID, printedPrice: price)
         var seenAssetStates = Set<String>()
+        var assetHistory = OptionalAssetHistory()
         for _ in 0..<40 {
             guard let currentPlayer = game.currentPlayer else { return false }
             if currentPlayer.cash >= price { return true }
@@ -594,6 +612,10 @@ struct ContentView: View {
                     fundingPurchase: offer
                 )
                 if decision == .done { return true }
+                if let reversedID = assetHistory.record(decision) {
+                    playerTurnStatus = "\(player.name) reversed a mortgage on \(game.board[reversedID].name); continuing to the purchase decision."
+                    return true
+                }
             } catch {
                 if OptionalDecisionPolicy.shouldContinueAfterOptionalAssetFailure(error) {
                     playerTurnStatus = "\(player.name)'s optional purchase-funding action was rejected; continuing to the purchase decision."
@@ -662,6 +684,26 @@ struct ContentView: View {
 
     private func strategyTransport(for endpoint: PlayerEndpoint) -> HermesTurnTransport {
         HermesTurnTransport(endpoint: endpoint, strategyContext: session.strategyJournal.context(for: endpoint))
+    }
+}
+
+struct ManualTurnResult {
+    let actingPlayerName: String
+    let currentPlayerName: String?
+
+    func status(actionTitle: String) -> String {
+        let actor = GameLogEntry.displayText(for: actingPlayerName)
+        let action = "\(actor) chose \(actionTitle)."
+        guard let current = currentPlayerName.map(GameLogEntry.displayText(for:)), current != actor else { return action }
+        return "\(action) Current player: \(current)."
+    }
+}
+
+@MainActor enum ManualTurnSubmission {
+    static func submit(_ action: GameAction, to game: GameEngine) -> ManualTurnResult? {
+        guard let actingPlayerName = game.currentPlayer?.name,
+              game.submit(action) else { return nil }
+        return ManualTurnResult(actingPlayerName: actingPlayerName, currentPlayerName: game.currentPlayer?.name)
     }
 }
 

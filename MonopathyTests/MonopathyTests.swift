@@ -192,6 +192,29 @@ final class MonopathyTests: XCTestCase {
         XCTAssertTrue(AssetSnapshot(engine: engine, player: engine.players[0]).hasOptionalActions)
     }
 
+    func testOptionalAssetHistoryDetectsMortgageReversalAcrossOtherActions() {
+        var history = OptionalAssetHistory()
+        XCTAssertNil(history.record(.mortgage(11)))
+        XCTAssertNil(history.record(.mortgage(5)))
+        XCTAssertNil(history.record(.build(9)))
+        XCTAssertEqual(history.record(.unmortgage(11)), 11)
+
+        var nextWindow = OptionalAssetHistory()
+        XCTAssertNil(nextWindow.record(.unmortgage(11)))
+        XCTAssertEqual(nextWindow.record(.mortgage(11)), 11)
+        var emptyWindow = OptionalAssetHistory()
+        XCTAssertNil(emptyWindow.record(.done))
+    }
+
+    func testAssetPromptWarnsAgainstMortgageRoundTrips() {
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        engine.grantPropertiesForTesting([11], to: engine.players[0].id)
+        let prompt = AssetProtocol.prompt(for: AssetSnapshot(engine: engine, player: engine.players[0]))
+        XCTAssertTrue(prompt.contains("Unmortgaging costs more"))
+        XCTAssertTrue(prompt.contains("do not mortgage and immediately unmortgage"))
+    }
+
     func testOptionalTradeIsSkippedUntilAnExchangeIsPossible() {
         let engine = GameEngine()
         engine.start(endpoints: fourPlayers)
@@ -683,12 +706,69 @@ final class MonopathyTests: XCTestCase {
         XCTAssertEqual(offer.groupMembers.count, 2)
     }
 
-    func testCoordinatorSubmitsOnlyValidatedTransportAction() async throws {
+    func testForcedRollSubmitsThroughEngineWithoutCallingModel() async throws {
         let engine = GameEngine(dice: { (1, 2) })
         engine.start(endpoints: fourPlayers)
-        let action = try await TurnCoordinator().playTurn(engine: engine, transport: FixedTransport(reply: "{\"action\":\"roll_dice\"}"))
+        let action = try await TurnCoordinator().playTurn(engine: engine, transport: UnexpectedTransport())
         XCTAssertEqual(action, .rollDice)
-        XCTAssertNotNil(engine.lastRoll)
+        XCTAssertEqual(engine.lastRoll?.0, 1)
+        XCTAssertEqual(engine.lastRoll?.1, 2)
+        XCTAssertEqual(engine.currentPlayer?.position, 3)
+        XCTAssertEqual(engine.phase, .awaitingPurchase)
+    }
+
+    func testManualActionReportsActingPlayerEvenAfterTurnAdvances() {
+        let engine = GameEngine(dice: { (1, 2) })
+        engine.start(endpoints: fourPlayers)
+        let firstName = engine.players[0].name
+        let secondName = engine.players[1].name
+
+        let roll = ManualTurnSubmission.submit(.rollDice, to: engine)
+        XCTAssertEqual(roll?.actingPlayerName, firstName)
+        XCTAssertEqual(roll?.currentPlayerName, firstName)
+        XCTAssertEqual(roll?.status(actionTitle: "Roll Dice"), "\(GameLogEntry.displayText(for: firstName)) chose Roll Dice.")
+        XCTAssertEqual(engine.phase, .awaitingPurchase)
+
+        let purchase = ManualTurnSubmission.submit(.buyProperty, to: engine)
+        XCTAssertEqual(purchase?.actingPlayerName, firstName)
+        XCTAssertEqual(purchase?.currentPlayerName, secondName)
+        XCTAssertEqual(purchase?.status(actionTitle: "Buy"), "\(GameLogEntry.displayText(for: firstName)) chose Buy. Current player: \(GameLogEntry.displayText(for: secondName)).")
+        XCTAssertEqual(engine.currentPlayer?.name, secondName)
+    }
+
+    func testRejectedManualActionDoesNotReportAnotherPlayer() {
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        let currentName = engine.currentPlayer?.name
+
+        XCTAssertNil(ManualTurnSubmission.submit(.buyProperty, to: engine))
+        XCTAssertEqual(engine.currentPlayer?.name, currentName)
+    }
+
+    func testGenuinePurchaseChoiceCallsModelAndSubmitsValidatedAction() async throws {
+        let engine = GameEngine(dice: { (1, 2) })
+        engine.start(endpoints: fourPlayers)
+        XCTAssertTrue(engine.submit(.rollDice))
+        XCTAssertEqual(engine.legalActions, [.buyProperty, .declineProperty])
+        let transport = CountingTransport(reply: "{\"action\":\"decline_property\"}")
+
+        let action = try await TurnCoordinator().playTurn(engine: engine, transport: transport)
+
+        let callCount = await transport.callCount
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(action, .declineProperty)
+        XCTAssertEqual(engine.phase, .auction)
+    }
+
+    func testNoLegalTurnActionDoesNotCallModel() async throws {
+        let engine = GameEngine()
+        XCTAssertTrue(engine.legalActions.isEmpty)
+        do {
+            _ = try await TurnCoordinator().playTurn(engine: engine, transport: UnexpectedTransport())
+            XCTFail("Expected an engine rejection when no turn action is legal")
+        } catch TurnCoordinatorError.engineRejected {
+            XCTAssertTrue(engine.legalActions.isEmpty)
+        }
     }
 
     func testAuctionCoordinatorValidatesAndAppliesBid() async throws {
@@ -797,10 +877,18 @@ final class MonopathyTests: XCTestCase {
         XCTAssertEqual(pink?.holdings.first { $0.playerID == recipient.id }?.propertyIDs, [13, 14])
         XCTAssertEqual(snapshot.propertyPrices[9], 120)
         XCTAssertFalse(snapshot.unownedPropertyIDs.contains(9))
+        let target = snapshot.setCompletionTargets.first { $0.colorGroup == "Light Blue" }
+        XCTAssertEqual(target?.recipientID, recipient.id)
+        XCTAssertEqual(target?.requestPropertyIDs, [9])
+        XCTAssertEqual(target?.reciprocalPropertyIDs, [11])
+        XCTAssertEqual(target?.suggestedCashOffer, 240)
 
         let proposalPrompt = TradeProtocol.proposalPrompt(for: snapshot)
         XCTAssertTrue(proposalPrompt.contains("mutually attractive exchange"))
         XCTAssertTrue(proposalPrompt.contains("completing a color group"))
+        XCTAssertTrue(proposalPrompt.contains("Prioritize making a concrete, plausible offer"))
+        XCTAssertTrue(proposalPrompt.contains("\"requestPropertyIDs\":[9]"))
+        XCTAssertTrue(proposalPrompt.contains("\"reciprocalPropertyIDs\":[11]"))
         XCTAssertTrue(proposalPrompt.contains("\"name\":\"Light Blue\""))
         XCTAssertTrue(proposalPrompt.contains("\"name\":\"Pink\""))
 
@@ -811,6 +899,26 @@ final class MonopathyTests: XCTestCase {
         XCTAssertTrue(responsePrompt.contains("\"name\":\"Light Blue\""))
         XCTAssertTrue(responsePrompt.contains("\"name\":\"Pink\""))
         XCTAssertTrue(engine.canExecuteTrade(offer))
+    }
+
+    func testCompletionTargetsExcludeMortgagedAndThreeWayGroups() {
+        let engine = GameEngine()
+        engine.start(endpoints: fourPlayers)
+        let proposer = engine.players[0]
+        let recipient = engine.players[1]
+        engine.grantPropertiesForTesting([6, 8], to: proposer.id)
+        engine.grantPropertiesForTesting([9], to: recipient.id)
+        XCTAssertEqual(TradeSnapshot(engine: engine, proposer: proposer).setCompletionTargets.map(\.colorGroup), ["Light Blue"])
+
+        XCTAssertTrue(engine.mortgage(spaceID: 9, by: recipient.id))
+        XCTAssertTrue(TradeSnapshot(engine: engine, proposer: proposer).setCompletionTargets.isEmpty)
+
+        let splitEngine = GameEngine()
+        splitEngine.start(endpoints: fourPlayers)
+        splitEngine.grantPropertiesForTesting([6], to: splitEngine.players[0].id)
+        splitEngine.grantPropertiesForTesting([8], to: splitEngine.players[1].id)
+        splitEngine.grantPropertiesForTesting([9], to: splitEngine.players[2].id)
+        XCTAssertTrue(TradeSnapshot(engine: splitEngine, proposer: splitEngine.players[0]).setCompletionTargets.isEmpty)
     }
 
     func testAssetCoordinatorAppliesOnlyValidatedMortgage() async throws {
@@ -944,8 +1052,20 @@ private struct FixedTransport: PlayerTurnTransport {
 
 private struct UnexpectedTransport: PlayerTurnTransport {
     func respond(to prompt: String) async throws -> String {
-        XCTFail("A forced decline must not call the model")
+        XCTFail("A forced or unavailable turn action must not call the model")
         return ""
+    }
+}
+
+private actor CountingTransport: PlayerTurnTransport {
+    let reply: String
+    private(set) var callCount = 0
+
+    init(reply: String) { self.reply = reply }
+
+    func respond(to prompt: String) async throws -> String {
+        callCount += 1
+        return reply
     }
 }
 

@@ -172,11 +172,12 @@ enum TurnCoordinatorError: LocalizedError {
 @MainActor
 final class TurnCoordinator {
     func playTurn(engine: GameEngine, transport: any PlayerTurnTransport) async throws -> GameAction {
-        // The caller offers purchase funding first. With no cash to buy,
-        // declining is the only remaining purchase decision.
-        if engine.legalActions == [.declineProperty] {
-            guard engine.submit(.declineProperty) else { throw TurnCoordinatorError.engineRejected }
-            return .declineProperty
+        let legalActions = engine.legalActions
+        guard !legalActions.isEmpty else { throw TurnCoordinatorError.engineRejected }
+        if legalActions.count == 1 {
+            let action = legalActions[0]
+            guard engine.submit(action) else { throw TurnCoordinatorError.engineRejected }
+            return action
         }
         let snapshot = TurnSnapshot(engine: engine)
         let reply = try await transport.respond(to: TurnProtocol.prompt(for: snapshot))
@@ -326,12 +327,23 @@ struct TradeSnapshot: Codable, Equatable {
         let holdings: [Holding]
     }
 
+    /// Negotiation advice only. The engine still validates the model's exact offer.
+    struct SetCompletionTarget: Codable, Equatable {
+        let colorGroup: String
+        let recipientID: UUID
+        let recipientName: String
+        let requestPropertyIDs: [Int]
+        let reciprocalPropertyIDs: [Int]
+        let suggestedCashOffer: Int
+    }
+
     let proposerID: UUID
     let proposerName: String
     let players: [PlayerState]
     let propertyNames: [Int: String]
     let propertyPrices: [Int: Int]
     let colorGroups: [ColorGroupState]
+    let setCompletionTargets: [SetCompletionTarget]
     let unownedPropertyIDs: [Int]
     let mortgagedPropertyIDs: [Int]
     let improvedPropertyIDs: [Int]
@@ -356,6 +368,39 @@ struct TradeSnapshot: Codable, Equatable {
                 return held.isEmpty ? nil : .init(playerID: player.id, playerName: player.name, propertyIDs: held)
             }
             return .init(name: name, propertyIDs: propertyIDs, holdings: holdings)
+        }
+        let excludedIDs = Set(improvedPropertyIDs).union(mortgagedPropertyIDs)
+        let priceByID = propertyPrices
+        let tradableGroups = colorGroups.filter { group in
+            !group.propertyIDs.contains { excludedIDs.contains($0) }
+        }
+        setCompletionTargets = tradableGroups.flatMap { group -> [SetCompletionTarget] in
+            let mine = Set(group.holdings.first { $0.playerID == proposer.id }?.propertyIDs ?? [])
+            guard !mine.isEmpty, mine.count < group.propertyIDs.count else { return [] }
+            let missing = Set(group.propertyIDs).subtracting(mine)
+            guard let owner = group.holdings.first(where: { Set($0.propertyIDs) == missing }),
+                  let recipient = activePlayers.first(where: { $0.id == owner.playerID }) else { return [] }
+
+            // A swap that also completes the recipient's set is more likely
+            // to be accepted than an unexplained request for their property.
+            let reciprocal = tradableGroups.compactMap { other -> [Int]? in
+                guard other.name != group.name else { return nil }
+                let theirs = Set(other.holdings.first { $0.playerID == recipient.id }?.propertyIDs ?? [])
+                let ours = Set(other.holdings.first { $0.playerID == proposer.id }?.propertyIDs ?? [])
+                guard !theirs.isEmpty, !ours.isEmpty,
+                      theirs.union(ours) == Set(other.propertyIDs) else { return nil }
+                return ours.sorted()
+            }.sorted { $0.count < $1.count }.first ?? []
+            let printedValue = missing.reduce(0) { $0 + (priceByID[$1] ?? 0) }
+            let suggestedCash = min(max(0, proposer.cash - 200), printedValue * 2)
+            return [.init(colorGroup: group.name, recipientID: recipient.id,
+                          recipientName: recipient.name, requestPropertyIDs: missing.sorted(),
+                          reciprocalPropertyIDs: reciprocal, suggestedCashOffer: suggestedCash)]
+        }.sorted {
+            if $0.requestPropertyIDs.count != $1.requestPropertyIDs.count {
+                return $0.requestPropertyIDs.count < $1.requestPropertyIDs.count
+            }
+            return $0.colorGroup < $1.colorGroup
         }
     }
 }
@@ -406,7 +451,7 @@ enum TradeProtocol {
         return """
         You are \(snapshot.proposerName), playing standard-rules Monopoly. If your cash is negative, this is your opportunity to raise funds before bankruptcy; otherwise, before your turn you may make exactly one voluntary trade offer, or make no offer. Strategy is yours; no trade is required.
 
-        Before choosing no_trade, actively look for a mutually attractive exchange. Split color groups can leave rents small relative to the $200 collected for passing GO; completing a color group can enable houses and much higher rent. Use colorGroups to find missing properties and consider cash-for-property, property swaps, or swaps plus cash that improve both players' positions. A printed property price is context, not a trade-value ceiling. Protect enough cash for rent and building, and avoid giving an opponent a strong monopoly without adequate compensation. If no plausible legal offer benefits you and has a reason for the recipient to accept, choose no_trade. The game validates ownership, cash, unimproved properties, and mortgage-transfer costs; your advice cannot change its rules.
+        Before choosing no_trade, actively look for a mutually attractive exchange. Split color groups can leave rents small relative to the $200 collected for passing GO; completing a color group can enable houses and much higher rent. The ranked setCompletionTargets identify deals that would complete one of YOUR color groups immediately. Prioritize making a concrete, plausible offer to the named recipient when this list is nonempty; do not wait passively for the other player to propose. requestPropertyIDs are the properties you need. reciprocalPropertyIDs, when present, would complete a different group for the recipient; consider offering them in a swap. suggestedCashOffer is an opening cash bid of up to twice printed value while retaining $200, not a mandatory price or cap. You may adjust cash, combine it with property swaps, or choose another legal offer to make acceptance worthwhile. Do not give away a much stronger monopoly without adequate compensation, and preserve enough liquidity for rent and building. If no plausible legal offer benefits you and gives the recipient a reason to accept, choose no_trade. The game validates ownership, cash, unimproved properties, and mortgage-transfer costs; your advice cannot change its rules.
 
         Table state JSON:
         \(state)
@@ -423,15 +468,16 @@ enum TradeProtocol {
         let offered = offer.fromProperties.sorted().map { propertyNames[$0] ?? "#\($0)" }.joined(separator: ", ")
         let requested = offer.toProperties.sorted().map { propertyNames[$0] ?? "#\($0)" }.joined(separator: ", ")
         let proposer = engine.players.first(where: { $0.id == offer.fromPlayerID })
+        let recipient = engine.players.first(where: { $0.id == offer.toPlayerID })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let state = proposer.flatMap { try? encoder.encode(TradeSnapshot(engine: engine, proposer: $0)) }
+        let state = recipient.flatMap { try? encoder.encode(TradeSnapshot(engine: engine, proposer: $0)) }
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         return """
         You are considering a standard-rules Monopoly trade offered by \(proposer?.name ?? "Opponent").
         You receive: $\(offer.fromCash), properties [\(offered)].
         You give: $\(offer.toCash), properties [\(requested)].
-        Inspect the colorGroups and cash below. Ask whether this exact exchange completes a set, improves your path to one, preserves useful liquidity, or compensates you for improving the other player. Declining every trade can leave all players with low undeveloped rent, but do not accept a bad offer merely to speed up the game. Decide strategy yourself. The game validates the offer; you can only accept this exact offer or decline it.
+        Inspect the colorGroups, setCompletionTargets, and cash below. Ask whether this exact exchange completes a set, improves your path to one, preserves useful liquidity, or compensates you for improving the other player. If the offered properties complete your own group, weigh the future building and rent opportunity, not just printed prices. Declining every trade can leave all players with low undeveloped rent, but do not accept a bad offer merely to speed up the game. Decide strategy yourself. The game validates the offer; you can only accept this exact offer or decline it.
 
         Table state JSON:
         \(state)
@@ -583,6 +629,29 @@ enum OptionalDecisionPolicy {
 }
 
 enum AssetDecision: Equatable { case done, mortgage(Int), unmortgage(Int), build(Int), sellBuilding(Int) }
+
+/// Tracks decisions in one optional asset window. A reversal is legal under
+/// the rules, but asking the model for more optional actions after it has
+/// started oscillating wastes cash and can delay the next turn indefinitely.
+struct OptionalAssetHistory {
+    private var mortgageStateByProperty: [Int: Bool] = [:]
+
+    mutating func record(_ decision: AssetDecision) -> Int? {
+        switch decision {
+        case let .mortgage(id):
+            let reversed = mortgageStateByProperty[id] == false
+            mortgageStateByProperty[id] = true
+            return reversed ? id : nil
+        case let .unmortgage(id):
+            let reversed = mortgageStateByProperty[id] == true
+            mortgageStateByProperty[id] = false
+            return reversed ? id : nil
+        case .done, .build, .sellBuilding:
+            return nil
+        }
+    }
+}
+
 private struct ProposedAssetAction: Decodable { let action: String; let propertyID: Int?; enum CodingKeys: String, CodingKey { case action; case propertyID = "property_id" } }
 
 enum AssetProtocolError: LocalizedError, Equatable {
@@ -604,7 +673,7 @@ enum AssetProtocol {
         }
         let correction = correctingMalformedReply ? "Your prior reply was not usable. Reply with one JSON object only—no Markdown or explanation." : ""
         return """
-        You are \(snapshot.playerName), playing standard-rules Monopoly. \(instruction) \(correction) Strategy is entirely yours; the game validates everything.
+        You are \(snapshot.playerName), playing standard-rules Monopoly. \(instruction) \(correction) Strategy is entirely yours; the game validates everything. Unmortgaging costs more than the cash received from mortgaging, so do not mortgage and immediately unmortgage the same property without a real reason.
 
         Asset state JSON:
         \(state)

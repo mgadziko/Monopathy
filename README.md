@@ -45,7 +45,9 @@ and releases happen here.
   decisions—build, sell a building, mortgage, or unmortgage—until it replies
   that it is finished. The app never chooses those actions for it. A malformed,
   illegal, or timed-out optional asset decision is rejected without stopping
-  automatic play.
+  automatic play. If a player reverses a mortgage decision on the same property
+  within one optional asset window, the app ends that window to prevent a
+  costly repeated loop; the engine's mortgage rules and later turns are unchanged.
 - If a payment makes a player insolvent, play pauses for that player to sell
   buildings, mortgage eligible property, or make one exact trade offer. The
   engine resumes the interrupted turn as soon as current cash covers the debt;
@@ -56,9 +58,12 @@ and releases happen here.
   A creditor inheriting a mortgaged property through bankruptcy likewise pays
   the standard immediate 10% mortgage interest to the Bank.
 - Trade proposals and responses include color-group holdings, property prices,
-  mortgages, and improvements. The prompts encourage both players to consider
-  mutually useful set-building exchanges instead of reflexively passing, but
-  never force a trade or change the engine's legality checks.
+  mortgages, and improvements. The app identifies and ranks immediately
+  completable color groups, names the owner and property IDs to negotiate for,
+  highlights reciprocal set-completing swaps, and suggests an opening cash bid
+  while reserving liquidity. These are strategy hints, not automatic offers:
+  each AI still decides whether and what to propose or accept, and the rules
+  engine validates every exact trade without changing Hasbro rules.
 - If a player owes the Bank and goes bankrupt, their returned properties are
   automatically auctioned to the remaining players before normal turn flow
   resumes; a mortgage on a returned property is cleared by its return.
@@ -81,9 +86,11 @@ and releases happen here.
   endpoint and sends it a current JSON decision prompt plus that endpoint's
   bounded, engine-generated strategy journal. It cannot use Hermes tools,
   terminals, external Hermes memories, or alter the rules engine directly.
-- Starting a game begins unthrottled automatic play: each active Hermes player
-  receives one strict turn request at a time and the next request is made as
-  soon as its legal action resolves. **Stop Automatic Play** is available
+- Starting a game begins unthrottled automatic play: when a turn has exactly
+  one legal action, the app submits it directly through the rules engine;
+  genuine choices receive one strict request to the active Hermes player at a
+  time, with the next request made as soon as its legal action resolves.
+  **Stop Automatic Play** is available
   between requests, and **Ask Current Player** supports manual prompting;
   an in-flight model request cannot yet be cancelled from the UI. Auctions use
   a separate strict `bid` or `pass` JSON proposal per eligible player, and
